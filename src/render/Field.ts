@@ -118,6 +118,21 @@ const INITIAL_PARTICLE = 0x9fc6ff;
  */
 const MORPH_RATE = 1.2;
 
+/**
+ * Trails.
+ *
+ * Not history sprites — the pool holds exactly one sprite per particle, and trailing three
+ * more behind each would triple the budget and make the particle slider a lie. Instead each
+ * sprite is stretched along its own velocity: rotation from atan2, long axis scaled by speed,
+ * short axis left alone. The texture is a soft radial dot, so a stretched one is a streak.
+ *
+ * It falls out of the physics rather than being layered on top. Particles accelerate as they
+ * fall, so streaks lengthen towards the core where the motion is most worth seeing, and a
+ * Gravity Pulse turns the whole field into inward streaks in a single frame.
+ */
+const TRAIL_SPEED_REF = 190;
+const TRAIL_MAX_STRETCH = 5;
+
 export interface FieldOptions {
   /** Called when the player clicks the field. */
   onPulse: () => void;
@@ -146,7 +161,10 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   stars.blendMode = 'add';
 
   const field = new ParticleContainer({
-    dynamicProperties: { position: true, color: true, scale: true, rotation: false, uvs: false, vertex: false },
+    // `scale` is not one of these — size and anchor are baked into `vertex`, so per-frame
+    // scale changes need `vertex: true`. Without it the pool's per-particle size variation
+    // is uploaded once at build time and every particle renders the same size forever.
+    dynamicProperties: { position: true, color: true, rotation: true, vertex: true, uvs: false },
   });
   field.blendMode = 'add';
 
@@ -280,6 +298,9 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       Math.min(MAX_VISUAL_SPAWN, Math.max(MIN_VISUAL_SPAWN, rates.spawnRate)) *
       (rates.reducedMotion ? 0.4 : 1);
 
+    // A trail is motion, so reduced motion takes it to nothing — one factor, not a branch.
+    const trail = rates.reducedMotion ? 0 : 1;
+
     geo.coreRadius = lerp(CORE_MIN_RADIUS, CORE_MAX_RADIUS, shown.scale);
 
     pool.emit(dt, emission, geo, tuning, rates.captureFraction);
@@ -301,11 +322,31 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       }
       sprite.x = pool.x[i] as number;
       sprite.y = pool.y[i] as number;
-      sprite.alpha = pool.alpha[i] as number;
-      const s = (pool.size[i] as number) * 0.13;
-      sprite.scaleX = s;
-      sprite.scaleY = s;
       sprite.tint = particleTint;
+
+      const s = (pool.size[i] as number) * 0.07;
+      const alpha = pool.alpha[i] as number;
+
+      if (trail === 0) {
+        sprite.rotation = 0;
+        sprite.scaleX = s;
+        sprite.scaleY = s;
+        sprite.alpha = alpha;
+        continue;
+      }
+
+      const vx = pool.vx[i] as number;
+      const vy = pool.vy[i] as number;
+      const speed = Math.hypot(vx, vy);
+      const stretch = 1 + Math.min(TRAIL_MAX_STRETCH, (speed / TRAIL_SPEED_REF) * trail);
+
+      sprite.rotation = Math.atan2(vy, vx);
+      sprite.scaleX = s * stretch;
+      sprite.scaleY = s;
+      // Spreading the same dot over more pixels should not also make it brighter. Full
+      // energy conservation (alpha / stretch) makes the fast ones vanish, which is the
+      // opposite of the point, so this splits the difference.
+      sprite.alpha = alpha / Math.sqrt(stretch);
     }
 
     // Core: sized by progress, brightened by what it just ate, with a slow idle breath.

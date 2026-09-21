@@ -96,6 +96,17 @@ Landing it meant retuning the economy. The ladder made an existing flaw impossib
 in seven minutes. Density is now multiplicative, the late-game cost exponents sum to 0.998,
 and the curve is straight. See the balance section of the design doc.
 
+**Particle trails — done.** Moved here from Phase 4 because it is cheap, depends on nothing,
+and the field's readability is worth more now than later. Each sprite is stretched along its
+own velocity — rotation from `atan2`, long axis scaled by speed — rather than trailed by
+history sprites, so the particle budget is untouched. See "Reading the field" in the design
+doc.
+
+Implementing it turned up a latent bug: `scale` is not one of Pixi's particle dynamic
+properties (size and anchor live in `vertex`), so per-frame scale changes had never been
+uploaded and every particle had been rendering at the size set when the pool was built. The
+per-particle size variation had been dead since Phase 1.
+
 Still to do:
 
 - **Achievements** (~60), each a small global bonus
@@ -118,10 +129,6 @@ different doing it.
 
 ### Phase 4 — Visual pass (~2-3 days)
 
-- **Particle trails** — stretch each sprite along its velocity vector rather than trailing
-  history sprites behind it, so the particle budget is untouched. The cheapest item in this
-  phase by a distance, and the one that most improves how the field reads: see "Reading the
-  field" in the design doc. It depends on nothing else here and could land at any point.
 - **Core surface detail** — the stage ladder gives this a concrete brief: fourteen distinct
   appearances, of which the current build has fourteen colour-and-size variations and nothing
   else. Bands for the gas giant, a lit limb for the planet, a corona for the star.
