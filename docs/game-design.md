@@ -29,6 +29,46 @@ you have built ignites, then collapses, then eats light itself.
 Left: the field. Right: the upgrade column. Everything the player needs in one view, no tabs
 until Phase 3 earns them.
 
+### Reading the field
+
+The field's job is to make the economy legible at a glance: how much is arriving, how much of
+it you are catching, and how hard you are pulling. Three things carry that.
+
+**Density** — how many particles are on screen, driven by `spawnRate`.
+
+**The catch ratio** — every particle rolls against `captureFraction` when it spawns, so the
+proportion that spiral in versus swing past is the same proportion the number is built from.
+The near-misses are not decoration; they are what makes the capture upgrades legible.
+
+**Motion** — and this is the one the current build under-serves.
+
+#### Particle trails
+
+A still frame of the field reads as a starfield: a scatter of dots with no direction. In
+motion the inward drift is there, but it is subtle, and the moment a Gravity Pulse yanks
+everything toward the core should be unmistakable. A short trail on each particle makes speed
+and direction readable in a single frame.
+
+How it is done matters, because the field is a pooled `ParticleContainer` holding exactly one
+sprite per particle with no per-frame allocation. The obvious implementation — a few history
+sprites trailing each particle — multiplies the particle budget by that number and throws
+away the property the pool exists to protect.
+
+Instead: **stretch each sprite along its own velocity vector.** Take rotation from
+`atan2(vy, vx)` and scale the sprite's long axis with speed, leaving the short axis alone.
+The particle texture is a soft radial dot, so stretching it produces a streak for free.
+
+- No extra sprites and no extra draw calls; the budget slider keeps meaning what it says
+- Costs one more dynamic property on the container (`rotation`) and an `atan2` per particle
+- Falls out of the physics rather than being layered on top: particles accelerate as they
+  fall, so streaks lengthen towards the core exactly where the motion is most interesting,
+  and a pulse turns the whole field into inward streaks in a single frame
+
+Two things to watch. Additive blending means overlapping streaks stack, so the stretch needs
+a ceiling or the centre blows out at high particle counts. And a trail is motion, so under
+`prefers-reduced-motion` it shortens to nothing — which the stretch factor makes a one-line
+change rather than a separate code path.
+
 ## The one number
 
 ```
@@ -234,7 +274,7 @@ high replay, and they exercise systems that already exist.
 
 ## Accessibility and performance targets
 
-- `prefers-reduced-motion` → fewer particles, no camera shake, no bloom pulse.
+- `prefers-reduced-motion` → fewer particles, no particle trails, no camera shake, no bloom pulse.
 - Colourblind-safe element palette; element tier is never signalled by colour alone.
 - Full keyboard navigation of the upgrade column; the field is decorative and `aria-hidden`.
 - 60 fps at 20k particles mid-range, 2k on mobile; economy tick < 1 ms; UI at 10-15 Hz.

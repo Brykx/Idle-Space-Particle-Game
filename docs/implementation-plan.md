@@ -117,10 +117,17 @@ sequence itself. Tab navigation arrives here, because now there is enough to nee
 different doing it.
 
 ### Phase 4 — Visual pass (~2-3 days)
-Custom shaders for core glow and bloom, particle trails, camera easing, audio layer. The
-stage ladder gives this a concrete brief: fourteen distinct core appearances, of which the
-current build has fourteen colour-and-size variations and no surface detail. The Phase 1
-renderer interface means this touches `render/` only.
+
+- **Particle trails** — stretch each sprite along its velocity vector rather than trailing
+  history sprites behind it, so the particle budget is untouched. The cheapest item in this
+  phase by a distance, and the one that most improves how the field reads: see "Reading the
+  field" in the design doc. It depends on nothing else here and could land at any point.
+- **Core surface detail** — the stage ladder gives this a concrete brief: fourteen distinct
+  appearances, of which the current build has fourteen colour-and-size variations and nothing
+  else. Bands for the gas giant, a lit limb for the planet, a corona for the star.
+- Custom shaders for core glow and bloom, camera easing, audio layer.
+
+The Phase 1 renderer interface means all of this touches `render/` only.
 
 **Done when:** the moment the core ignites is worth recording.
 
