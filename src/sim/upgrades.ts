@@ -1,0 +1,137 @@
+import { D, type Num } from './numbers';
+
+/**
+ * Upgrades are data, not code.
+ *
+ * Adding one is an entry in this file: the UI, the cost maths, the save format and the
+ * balance tool all pick it up for free. That is what keeps later acts cheap instead of a
+ * rewrite each.
+ *
+ * Every upgrade feeds exactly one of the four terms in
+ *   massPerSecond = spawnRate x captureFraction x massPerParticle x globalMultiplier
+ * so a player who reads one tooltip understands the whole economy.
+ */
+
+export const UPGRADE_IDS = ['gravity', 'radius', 'density', 'particleMass', 'efficiency'] as const;
+
+export type UpgradeId = (typeof UPGRADE_IDS)[number];
+
+export interface UpgradeDef {
+  id: UpgradeId;
+  name: string;
+  /** Flavour, one line, shown under the name. */
+  blurb: string;
+  /** Which term of the mass formula this feeds. Shown as a tag. */
+  term: 'spawn' | 'capture' | 'value' | 'global';
+  baseCost: Num;
+  /** Cost multiplier per level. Cheap upgrades grow slowly and stay clicky. */
+  growth: number;
+  /** Revealed once total mass ever earned passes this. */
+  unlockAt: Num;
+  /** Human-readable description of what the next level buys. */
+  perLevel: string;
+}
+
+export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
+  gravity: {
+    id: 'gravity',
+    name: 'Gravity Well',
+    blurb: 'Deepen the potential. Distant particles begin to notice you.',
+    term: 'capture',
+    baseCost: D(10),
+    growth: 1.25,
+    unlockAt: D(0),
+    perLevel: 'x1.20 gravity',
+  },
+  radius: {
+    id: 'radius',
+    name: 'Capture Radius',
+    blurb: 'Widen the cross-section the core presents to the drift.',
+    term: 'capture',
+    baseCost: D(25),
+    growth: 1.28,
+    unlockAt: D(0),
+    perLevel: '+2.5 reach',
+  },
+  density: {
+    id: 'density',
+    name: 'Particle Density',
+    blurb: 'Draw from a thicker stretch of the cloud.',
+    term: 'spawn',
+    baseCost: D(80),
+    growth: 1.25,
+    unlockAt: D(50),
+    perLevel: '+1 particle/s',
+  },
+  particleMass: {
+    id: 'particleMass',
+    name: 'Particle Mass',
+    blurb: 'Favour the heavy stuff. Each capture is worth more.',
+    term: 'value',
+    baseCost: D(300),
+    growth: 1.35,
+    unlockAt: D(150),
+    perLevel: 'x1.25 per particle',
+  },
+  efficiency: {
+    id: 'efficiency',
+    name: 'Accretion Efficiency',
+    blurb: 'Lose less to radiation on the way in.',
+    term: 'global',
+    baseCost: D(2500),
+    growth: 2,
+    unlockAt: D(1500),
+    perLevel: 'x1.22 to everything',
+  },
+};
+
+export const UPGRADE_LIST: UpgradeDef[] = UPGRADE_IDS.map((id) => UPGRADES[id]);
+
+/** Cost of the single next level, given how many you already own. */
+export function costAt(def: UpgradeDef, level: number): Num {
+  return def.baseCost.mul(D(def.growth).pow(level));
+}
+
+/**
+ * Cost of `count` levels starting from `level` — the geometric sum, in closed form, so
+ * "buy max" stays instant at level 400.
+ */
+export function costOfLevels(def: UpgradeDef, level: number, count: number): Num {
+  if (count <= 0) return D(0);
+  const g = D(def.growth);
+  return costAt(def, level).mul(g.pow(count).sub(1)).div(g.sub(1));
+}
+
+export interface Purchase {
+  levels: number;
+  cost: Num;
+}
+
+/**
+ * The largest number of levels `budget` can afford, and the exact total.
+ *
+ * Inverts the geometric sum, then walks back if the logarithm rounded us one level too
+ * generous — the caller is spending real currency and must never overdraw.
+ */
+export function maxAffordable(def: UpgradeDef, level: number, budget: Num): Purchase {
+  const next = costAt(def, level);
+  if (budget.lt(next)) return { levels: 0, cost: D(0) };
+
+  const g = def.growth;
+  const ratio = budget.mul(g - 1).div(next).add(1);
+  let k = Math.floor(ratio.log10() / Math.log10(g));
+  if (!Number.isFinite(k) || k < 1) k = 1;
+
+  // Trust the closed form, verify the boundary.
+  let cost = costOfLevels(def, level, k);
+  while (k > 1 && cost.gt(budget)) {
+    k -= 1;
+    cost = costOfLevels(def, level, k);
+  }
+  while (costOfLevels(def, level, k + 1).lte(budget)) {
+    k += 1;
+    cost = costOfLevels(def, level, k);
+  }
+
+  return { levels: k, cost };
+}
