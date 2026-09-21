@@ -113,6 +113,8 @@ loop, and unnoticeable.
 ## 4. Build, test, deploy
 
 - **Vite** — dev server, TS, static build. No debate here.
+- **TypeScript 6**, not 7 — `svelte-check` declares a peer range of `^5 || ^6` and npm
+  refuses to resolve past it. Worth knowing before an afternoon disappears into it.
 - **Vitest** — the economy is pure functions; this is where the real test value is.
 - **Playwright** — one smoke test: load, buy an upgrade, reload, mass persisted.
 - **GitHub Actions → GitHub Pages** — it's a static bundle; deploy on merge to `main`.

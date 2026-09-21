@@ -43,7 +43,7 @@ these four terms — that constraint keeps a 40-upgrade endgame comprehensible.
 
 ```
 effectiveReach  = captureRadius × sqrt(gravity)
-captureFraction = effectiveReach / (effectiveReach + K)        // K = 40, tuned
+captureFraction = effectiveReach / (effectiveReach + K)        // K = 30, tuned
 ```
 
 Asymptotic to 1, never reaching it. Radius and gravity always do something, never break the
@@ -52,13 +52,29 @@ hard cap the player can bump into.
 
 ### Upgrade formulas
 
-| Upgrade | Base cost | Growth | Effect / level |
-|---|---|---|---|
-| Gravity Well | 10 | 1.15 | gravity ×1.12 |
-| Capture Radius | 25 | 1.18 | radius +1.5 |
-| Particle Density | 100 | 1.22 | spawnRate +0.5/s |
-| Particle Mass | 500 | 1.30 | massPerParticle ×1.20 |
-| Accretion Efficiency | 2,500 | 1.50 | global ×1.02, softcapped |
+Base values: gravity 1, radius 10, spawn 4/s, mass 1 per particle — an opening rate of
+1.00 mass/s against a first upgrade costing 10.
+
+| Upgrade | Base cost | Growth | Effect / level | Unlocks at |
+|---|---|---|---|---|
+| Gravity Well | 10 | 1.25 | gravity ×1.20 | — |
+| Capture Radius | 25 | 1.28 | radius +2.5 | — |
+| Particle Density | 80 | 1.25 | spawnRate +1/s | 50 |
+| Particle Mass | 300 | 1.35 | massPerParticle ×1.25 | 150 |
+| Accretion Efficiency | 2,500 | 2.00 | global ×1.22 | 1,500 |
+
+These came out of the balance tool, not out of the air. The ratio that decides everything is
+`ln(effect) / ln(growth)`: below 1 an upgrade returns less than it costs and progress is
+polynomial; at 1 income tracks spending and mass grows exponentially; above 1 it blows up in
+finite time. The first tuning pass had every upgrade under 1 and took over two hours to reach
+1e6. The second summed to ~1.5 across the late-game upgrades and collapsed 1e6 → 1e12 into
+37 seconds. The shipped numbers put the two upgrades that survive to the late game
+(Particle Mass at 0.74, Efficiency at 0.29) just over 1 combined.
+
+Capture and reach saturate, so Gravity Well and Capture Radius are deliberately an opening:
+they carry the first ten minutes and then hand over. Particle Density is additive against an
+exponential cost, which makes it the cheap, frequent, always-something-to-buy upgrade rather
+than an engine.
 
 `cost(n) = base × growth^n`, so total for n levels is a geometric sum — closed form, which
 "buy max" needs to stay instant at level 400.
@@ -69,8 +85,9 @@ every **15-60 seconds** for the first hour.
 
 ### Active play: Gravity Pulse
 
-Click the field to emit a pulse that yanks nearby particles into the core: a real visual
-event, worth ~5 s of production, on a 10 s cooldown. Active play is a modest bonus, never a
+Click the field (or press space) to emit a pulse that yanks nearby particles into the core: a
+real visual event, worth 5 s of production or 3 particles outright — whichever is kinder, so
+it is worth something on the very first click — on a 10 s cooldown. Active play is a modest bonus, never a
 requirement — upgrades later automate it entirely. Idle games that punish you for closing the
 tab don't get reopened.
 
@@ -156,12 +173,21 @@ Pacing gets tested, not guessed. A headless sim (`npm run balance`) plays the ga
 greedy buy-cheapest-first policy and prints time-to-milestone:
 
 ```
-1e3  mass     0:41
-1e6  mass     6:12
-1e9  mass    23:50
-1e12 mass  1:04:30   ← ignition
-prestige 1 6:02:10
+  1e3  mass                   4:48    gravity 11  radius 6  density 2
+  1e6  mass                  29:13    gravity 39  radius 31  density 29  particleMass 19
+  1e9  mass                  38:24    gravity 70  radius 59  density 60  particleMass 42
+  1e12 mass  (ignition)      42:56    gravity 101 radius 87  density 92  particleMass 64
+
+  first hour: 369 purchases   income doubles every 111s   (target 45-150s)
+              +1.4% per purchase   (target 1-15%)   longest wait 25s
 ```
 
-Those numbers are asserted in CI with generous bounds. A tuning change that quietly doubles
-the first hour then fails a test instead of shipping.
+Counting purchases turned out to measure the bot's policy rather than the design — an agent
+that buys the moment it can afford anything always buys one level at a time, whatever the
+curve. Income doubling time and gain per purchase describe how the game *feels*, so those are
+what get asserted.
+
+The bounds in `tests/balance.test.ts` are generous on purpose. They are not claiming the
+tuning is good; they catch a change that quietly doubles the first hour or collapses the last
+three orders of magnitude into nothing. Both are easy to do by accident and invisible in a
+five-minute play test.

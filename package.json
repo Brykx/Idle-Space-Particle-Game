@@ -10,7 +10,9 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "balance": "tsx tools/balance.ts"
+    "balance": "tsx tools/balance.ts",
+    "test:e2e": "playwright test",
+    "test:all": "npm run check && npm run test && npm run test:e2e"
   },
   "dependencies": {
     "break_infinity.js": "^2.2.0",
@@ -18,11 +20,13 @@
     "svelte": "^5.57.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tsconfig/svelte": "^5.0.8",
+    "@types/node": "^26.6.2",
     "svelte-check": "^4.7.6",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2",
+    "typescript": "^6.0.3",
     "vite": "^8.3.0",
     "vitest": "^5.0.1"
   }

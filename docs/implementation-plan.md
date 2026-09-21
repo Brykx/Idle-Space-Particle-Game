@@ -41,9 +41,14 @@ Three rules hold the whole thing together:
 // pure: state -> every derived number. Called by UI, renderer, and tests alike.
 export function deriveRates(s: GameState): Rates
 
-// pure: advance by exactly dt seconds. The only place mass changes.
-export function tick(s: GameState, dt: number): GameState
+// advance by exactly dt seconds, in place. The only place mass changes.
+export function tick(s: GameState, dt: number): void
 ```
+
+`tick` mutates rather than returning a clone: offline catch-up calls it up to a thousand
+times in a row and the loop owns exactly one state object. `deriveRates` stays pure, which is
+where purity actually buys something — the UI, the renderer, the balance tool and the tests
+all call it freely.
 
 Offline progress is then just `tick` in a loop with a coarse `dt`, which is why it stays
 correct for free as systems are added.
@@ -52,14 +57,14 @@ correct for free as systems are added.
 
 Each phase ends playable and committed. No phase depends on a later one existing.
 
-### Phase 0 — Scaffold (~half a day)
+### Phase 0 — Scaffold — **done**
 Vite + TS + Svelte, strict mode, Vitest, ESLint/Prettier, GitHub Actions running typecheck
 and tests, GitHub Pages deploy on `main`. Empty `GameState` that saves, loads, and survives
 a refresh. Boring and load-bearing: a save system added in week three eats the week.
 
 **Done when:** CI green, site deploys, a counter persists across reload.
 
-### Phase 1 — Vertical slice (~2 days) ← *the one that matters*
+### Phase 1 — Vertical slice — **done**
 The full core loop, thin:
 - `deriveRates` / `tick` with the four-term formula
 - the five Act I upgrades, data-driven, with buy-1 / buy-max
@@ -72,7 +77,11 @@ The full core loop, thin:
 **Done when:** it's fun for ten minutes with the sound off. If it isn't, the problem is
 Act I's tuning and it is far cheaper to find now than after Act IV.
 
-### Phase 2 — Depth and automation (~3 days)
+Shipped: 39 unit tests, 7 browser smoke tests, and a pacing report wired into CI. The tuning
+went through three passes before the curve held its shape — see the balance section of the
+design doc.
+
+### Phase 2 — Depth and automation (~3 days) ← *next*
 Milestones, achievements, accretion disk, auto-buyers with toggles and priority, statistics
 panel, settings (particle budget, notation, reduced motion), Energy + the element chain,
 magnetic field, the iron wall.
