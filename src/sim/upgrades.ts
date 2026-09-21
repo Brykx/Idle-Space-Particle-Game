@@ -12,7 +12,16 @@ import { D, type Num } from './numbers';
  * so a player who reads one tooltip understands the whole economy.
  */
 
-export const UPGRADE_IDS = ['gravity', 'radius', 'density', 'particleMass', 'efficiency'] as const;
+export const UPGRADE_IDS = [
+  'gravity',
+  'radius',
+  'density',
+  'particleMass',
+  'efficiency',
+  'disk',
+  'confinement',
+  'magnetic',
+] as const;
 
 export type UpgradeId = (typeof UPGRADE_IDS)[number];
 
@@ -21,8 +30,10 @@ export interface UpgradeDef {
   name: string;
   /** Flavour, one line, shown under the name. */
   blurb: string;
-  /** Which term of the mass formula this feeds. Shown as a tag. */
-  term: 'spawn' | 'capture' | 'value' | 'global';
+  /** Which term this feeds. Shown as a tag, and it decides which income a level improves. */
+  term: 'spawn' | 'capture' | 'value' | 'global' | 'energy' | 'requirement';
+  /** What it is bought with. Energy upgrades are the sink for accumulated energy. */
+  currency: 'mass' | 'energy';
   baseCost: Num;
   /** Cost multiplier per level. Cheap upgrades grow slowly and stay clicky. */
   growth: number;
@@ -38,6 +49,7 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
     name: 'Gravity Well',
     blurb: 'Deepen the potential. Distant particles begin to notice you.',
     term: 'capture',
+    currency: 'mass',
     baseCost: D(10),
     growth: 1.425,
     unlockAt: D(0),
@@ -48,6 +60,7 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
     name: 'Capture Radius',
     blurb: 'Widen the cross-section the core presents to the drift.',
     term: 'capture',
+    currency: 'mass',
     baseCost: D(25),
     growth: 1.5,
     unlockAt: D(0),
@@ -58,6 +71,7 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
     name: 'Particle Density',
     blurb: 'Draw from a thicker stretch of the cloud.',
     term: 'spawn',
+    currency: 'mass',
     baseCost: D(30),
     growth: 1.685,
     unlockAt: D(20),
@@ -68,6 +82,7 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
     name: 'Particle Mass',
     blurb: 'Favour the heavy stuff. Each capture is worth more.',
     term: 'value',
+    currency: 'mass',
     baseCost: D(100),
     growth: 1.826,
     unlockAt: D(250),
@@ -78,12 +93,54 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
     name: 'Accretion Efficiency',
     blurb: 'Lose less to radiation on the way in.',
     term: 'global',
+    currency: 'mass',
     baseCost: D(750),
     growth: 3.79,
     unlockAt: D(1200),
     perLevel: 'x1.34 to everything',
   },
+
+  // --- the energy economy ------------------------------------------------------------
+  //
+  // The disk is built with mass; what it produces is bought back with energy. That split is
+  // what stops the second currency being mass wearing a hat.
+  disk: {
+    id: 'disk',
+    name: 'Accretion Disk',
+    blurb: 'A ring of infalling matter, shearing against itself. Feed it back into itself.',
+    term: 'energy',
+    currency: 'energy',
+    baseCost: D(5e3),
+    growth: 4,
+    unlockAt: D(5e6),
+    perLevel: 'x1.15 throughput',
+  },
+  confinement: {
+    id: 'confinement',
+    name: 'Magnetic Confinement',
+    blurb: 'Hold the burning region together, and it takes less to keep it lit.',
+    term: 'requirement',
+    currency: 'energy',
+    baseCost: D(2e4),
+    growth: 2.6,
+    unlockAt: D(2e7),
+    perLevel: 'x0.9 to fusion requirements',
+  },
+  magnetic: {
+    id: 'magnetic',
+    name: 'Field Lines',
+    blurb: 'Channel the ionised infall along the field instead of letting it scatter.',
+    term: 'energy',
+    currency: 'energy',
+    baseCost: D(5e4),
+    growth: 2.8,
+    unlockAt: D(1e8),
+    perLevel: 'x1.12 throughput',
+  },
 };
+
+/** The five that feed the mass formula, in the order the player meets them. */
+export const MASS_UPGRADE_IDS = UPGRADE_IDS.filter((id) => UPGRADES[id].currency === 'mass' && UPGRADES[id].term !== 'energy');
 
 export const UPGRADE_LIST: UpgradeDef[] = UPGRADE_IDS.map((id) => UPGRADES[id]);
 

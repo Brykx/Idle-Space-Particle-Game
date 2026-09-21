@@ -10,6 +10,7 @@ import {
   tick,
 } from './sim/economy';
 import { ACHIEVEMENTS, multiplierFor } from './sim/achievements';
+import { ELEMENTS, REACHABLE_ELEMENTS, elementAt } from './sim/elements';
 import { initialState, type GameState } from './sim/state';
 import { UPGRADE_LIST, maxAffordable, type UpgradeId } from './sim/upgrades';
 import { applyOffline, type AwayReport } from './sim/offline';
@@ -61,6 +62,19 @@ export interface UpgradeView {
   autoBuyUnlocked: boolean;
   /** Level this upgrade must reach before it will buy itself. */
   autoBuyAt: number;
+  currency: 'mass' | 'energy';
+}
+
+export interface ElementRowView {
+  id: string;
+  name: string;
+  symbol: string;
+  multiplier: string;
+  /** Throughput it asks for, formatted — or an em dash for iron. */
+  requires: string;
+  reached: boolean;
+  current: boolean;
+  unreachable: boolean;
 }
 
 export interface AchievementRowView {
@@ -111,7 +125,23 @@ export interface View {
   massPerParticle: string;
   globalMultiplier: string;
 
+  /** The five that feed the mass formula. */
   upgrades: UpgradeView[];
+  /** The energy economy's own upgrades. */
+  energyUpgrades: UpgradeView[];
+
+  energyUnlocked: boolean;
+  energy: string;
+  energyPerSecond: string;
+  throughput: string;
+  elementName: string;
+  elementSymbol: string;
+  elementBlurb: string;
+  elementMultiplier: string;
+  /** 0..1 towards the next fusion tier, in orders of throughput. */
+  elementProgress: number;
+  nextElementName: string;
+  elements: ElementRowView[];
 
   pulseReady: boolean;
   pulseCooldown: number;
@@ -159,6 +189,18 @@ function emptyView(): View {
     massPerParticle: '0',
     globalMultiplier: 'x1',
     upgrades: [],
+    energyUpgrades: [],
+    energyUnlocked: false,
+    energy: '0',
+    energyPerSecond: '0',
+    throughput: '0%',
+    elementName: '',
+    elementSymbol: '',
+    elementBlurb: '',
+    elementMultiplier: 'x1.00',
+    elementProgress: 0,
+    nextElementName: '',
+    elements: [],
     pulseReady: true,
     pulseCooldown: 0,
     pulseYield: '0',
@@ -295,23 +337,38 @@ function createGame() {
     view.massPerParticle = format(rates.massPerParticle, notation);
     view.globalMultiplier = `x${rates.globalMultiplier.toFixed(2)}`;
 
-    view.upgrades = UPGRADE_LIST.filter((def) => isUnlocked(state, def)).map((def) => {
+    const buildRow = (def: (typeof UPGRADE_LIST)[number]): UpgradeView => {
       const cost = nextCost(state, def.id);
-      const affordable = state.mass.gte(cost);
-      const best = maxAffordable(def, state.levels[def.id], state.mass);
+      const wallet = def.currency === 'energy' ? state.energy : state.mass;
+      const income = def.currency === 'energy' ? rates.energyPerSecond : rates.massPerSecond;
+      const affordable = wallet.gte(cost);
+      const best = maxAffordable(def, state.levels[def.id], wallet);
       const seconds = affordable
         ? 0
-        : rates.massPerSecond.lte(0)
+        : income.lte(0)
           ? Infinity
-          : cost.sub(state.mass).div(rates.massPerSecond).toNumber();
+          : cost.sub(wallet).div(income).toNumber();
 
       // What one more level actually does. Cheapest-first automation cannot tell that an
       // upgrade has saturated, so the player needs to be able to.
+      //
+      // Measured against the thing the upgrade actually moves: a disk level usually changes
+      // mass income by nothing at all, right up until it tips the core over a fusion
+      // threshold, so showing it as "+0% income" would read as broken rather than as
+      // progress towards the next element.
       const probe: GameState = {
         ...state,
         levels: { ...state.levels, [def.id]: state.levels[def.id] + 1 },
       };
-      const gainFraction = deriveRates(probe).massPerSecond.div(rates.massPerSecond).toNumber() - 1;
+      const after = deriveRates(probe);
+      const gainFraction =
+        def.term === 'energy'
+          ? after.diskThroughput / rates.diskThroughput - 1
+          : def.term === 'requirement'
+            ? 1 - after.requirementScale / rates.requirementScale
+            : after.massPerSecond.div(rates.massPerSecond).toNumber() - 1;
+      const gainLabel =
+        def.term === 'energy' ? 'throughput' : def.term === 'requirement' ? 'cheaper to hold' : 'income';
 
       return {
         id: def.id,
@@ -325,12 +382,56 @@ function createGame() {
         maxLevels: best.levels,
         maxCost: format(best.cost, notation),
         eta: affordable ? '' : formatDuration(seconds),
-        gain: `+${(gainFraction * 100).toFixed(gainFraction < 0.01 ? 2 : 1)}%`,
+        gain: `+${(gainFraction * 100).toFixed(gainFraction < 0.01 ? 2 : 1)}% ${gainLabel}`,
         autoBuy: state.autoBuy[def.id],
         autoBuyUnlocked: autoBuyUnlocked(state, def.id),
         autoBuyAt: AUTO_BUY_LEVEL,
+        currency: def.currency,
       };
-    });
+    };
+
+    const visible = UPGRADE_LIST.filter((def) => isUnlocked(state, def));
+    view.upgrades = visible.filter((def) => def.term !== 'energy' && def.term !== 'requirement').map(buildRow);
+    view.energyUpgrades = visible.filter((def) => def.term === 'energy' || def.term === 'requirement').map(buildRow);
+
+    // --- the energy economy ---------------------------------------------------------
+    view.energyUnlocked = rates.energyPerSecond.gt(0);
+    view.energy = format(state.energy, notation);
+    view.energyPerSecond = format(rates.energyPerSecond, notation);
+    view.throughput = `${(rates.diskThroughput * 100).toPrecision(3)}%`;
+
+    const element = elementAt(rates.elementTier);
+    view.elementName = element.name;
+    view.elementSymbol = element.symbol;
+    view.elementBlurb = element.blurb;
+    view.elementMultiplier = `x${rates.elementMultiplier.toFixed(2)}`;
+    view.nextElementName = REACHABLE_ELEMENTS[rates.elementTier + 1]?.name ?? '';
+
+    // Measured in orders of throughput, because that is how throughput moves.
+    const need = rates.nextElementRequirement;
+    const have = element.requires === null ? 0 : element.requires * rates.requirementScale;
+    view.elementProgress =
+      need === null || need <= 0
+        ? 1
+        : Math.max(
+            0,
+            Math.min(
+              1,
+              (Math.log10(rates.diskThroughput) - Math.log10(Math.max(have, 1e-12))) /
+                (Math.log10(need) - Math.log10(Math.max(have, 1e-12))),
+            ),
+          );
+
+    view.elements = ELEMENTS.map((entry, index) => ({
+      id: entry.id,
+      name: entry.name,
+      symbol: entry.symbol,
+      multiplier: `x${entry.multiplier.toFixed(2)}`,
+      requires: entry.requires === null ? '—' : `${(entry.requires * rates.requirementScale * 100).toPrecision(3)}%`,
+      reached: entry.requires !== null && index <= rates.elementTier,
+      current: index === rates.elementTier,
+      unreachable: entry.requires === null,
+    }));
 
     const unlocked = new Set(state.achievements);
     view.achievements = ACHIEVEMENTS.map((achievement) => ({

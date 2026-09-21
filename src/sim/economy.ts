@@ -2,6 +2,7 @@ import { D, type Num } from './numbers';
 import { PULSE_COOLDOWN, type GameState } from './state';
 import { ACHIEVEMENTS, multiplierFor } from './achievements';
 import { stageIndexFor } from './stages';
+import { elementAt, elementTierFor, nextRequirement } from './elements';
 import {
   UPGRADE_LIST,
   UPGRADES,
@@ -47,6 +48,9 @@ export const AUTO_BUY_LEVEL = 25;
  */
 const MAX_AUTO_PURCHASES_PER_TICK = 2000;
 
+/** Fraction of the raw infall a bare disk sheds as energy. */
+const BASE_THROUGHPUT = 2e-5;
+
 /** A pulse is worth this many seconds of production... */
 const PULSE_SECONDS = 5;
 /** ...or this many particles outright, whichever is kinder. Keeps the opening minute alive. */
@@ -65,6 +69,18 @@ export interface Rates {
   massPerSecond: Num;
   /** What a pulse would pay right now. */
   pulseYield: Num;
+
+  // --- the energy economy -------------------------------------------------------------
+  /** Fraction of the raw infall the disk sheds as energy. */
+  diskThroughput: number;
+  energyPerSecond: Num;
+  /** Multiplies what every fusion tier asks for. Below 1 once Confinement is bought. */
+  requirementScale: number;
+  elementTier: number;
+  /** Multiplies mass per particle. The element chain's whole effect on income. */
+  elementMultiplier: number;
+  /** Throughput the next tier asks for, or null at the end of what is reachable. */
+  nextElementRequirement: number | null;
 }
 
 /** Pure: state in, every derived number out. Used by the UI, the renderer and the tests alike. */
@@ -79,11 +95,31 @@ export function deriveRates(s: GameState): Rates {
   // Guard the far end: once gravity overflows a float the fraction is 1 for all purposes.
   const captureFraction = Number.isFinite(reach) ? reach / (reach + CAPTURE_K) : 1;
 
-  const massPerSecond = massPerParticle.mul(spawnRate * captureFraction * globalMultiplier);
+  // The energy economy, computed from the *raw* infall rather than the finished one.
+  //
+  // That ordering is not cosmetic: energy decides the element tier, the tier multiplies mass
+  // per particle, and mass income would otherwise decide energy — a cycle. Taxing the raw
+  // infall breaks it, and it is the more honest reading anyway. The disk extracts energy from
+  // material falling in; what the core then fuses it into is a separate question.
+  const rawMassPerSecond = massPerParticle.mul(spawnRate * captureFraction * globalMultiplier);
+
+  // A disk forms once the core is heavy enough to have one; the upgrades sharpen the one you
+  // have. Everything on this side is bought with energy, and energy is taxed from the *raw*
+  // infall, so an element tier can never fund the disk level that reaches the next tier.
+  // That loop is what made the first two attempts cascade through the whole chain at once.
+  const hasDisk = s.totalMassEver.gte(UPGRADES.disk.unlockAt);
+  const diskThroughput = BASE_THROUGHPUT * Math.pow(1.15, s.levels.disk) * Math.pow(1.12, s.levels.magnetic);
+  const energyPerSecond = hasDisk ? rawMassPerSecond.mul(diskThroughput) : D(0);
+
+  const requirementScale = Math.pow(0.9, s.levels.confinement);
+  const elementTier = hasDisk ? elementTierFor(diskThroughput, requirementScale) : 0;
+  const elementMultiplier = elementAt(elementTier).multiplier;
+
+  const massPerSecond = rawMassPerSecond.mul(elementMultiplier);
 
   const pulseYield = Num_max(
     massPerSecond.mul(PULSE_SECONDS),
-    massPerParticle.mul(PULSE_MIN_PARTICLES * globalMultiplier),
+    massPerParticle.mul(PULSE_MIN_PARTICLES * globalMultiplier * elementMultiplier),
   );
 
   return {
@@ -92,10 +128,16 @@ export function deriveRates(s: GameState): Rates {
     reach,
     captureFraction,
     spawnRate,
-    massPerParticle,
+    massPerParticle: massPerParticle.mul(elementMultiplier),
     globalMultiplier,
     massPerSecond,
     pulseYield,
+    diskThroughput,
+    energyPerSecond,
+    requirementScale,
+    elementTier,
+    elementMultiplier,
+    nextElementRequirement: nextRequirement(elementTier, requirementScale),
   };
 }
 
@@ -108,6 +150,22 @@ export function earn(s: GameState, amount: Num): void {
   if (amount.lte(0)) return;
   s.mass = s.mass.add(amount);
   s.totalMassEver = s.totalMassEver.add(amount);
+}
+
+export function earnEnergy(s: GameState, amount: Num): void {
+  if (amount.lte(0)) return;
+  s.energy = s.energy.add(amount);
+  s.totalEnergyEver = s.totalEnergyEver.add(amount);
+}
+
+/** What an upgrade is paid with. */
+export function walletFor(s: GameState, def: UpgradeDef): Num {
+  return def.currency === 'energy' ? s.energy : s.mass;
+}
+
+function spend(s: GameState, def: UpgradeDef, amount: Num): void {
+  if (def.currency === 'energy') s.energy = s.energy.sub(amount);
+  else s.mass = s.mass.sub(amount);
 }
 
 /** An upgrade buys itself only once you have invested in it by hand. */
@@ -138,27 +196,31 @@ export function runAutoBuyers(s: GameState): number {
   const spendFraction = 1 - s.settings.autoBuyReserve;
   let bought = 0;
 
-  for (let n = 0; n < MAX_AUTO_PURCHASES_PER_TICK; n++) {
-    let cheapestId: UpgradeId | null = null;
-    let cheapest: Num | null = null;
+  // Per currency: "cheapest" only means something between prices in the same units.
+  for (const currency of ['mass', 'energy'] as const) {
+    for (let n = 0; n < MAX_AUTO_PURCHASES_PER_TICK; n++) {
+      let cheapestId: UpgradeId | null = null;
+      let cheapest: Num | null = null;
 
-    for (const def of UPGRADE_LIST) {
-      if (!s.autoBuy[def.id]) continue;
-      if (!autoBuyUnlocked(s, def.id)) continue;
-      if (!isUnlocked(s, def)) continue;
+      for (const def of UPGRADE_LIST) {
+        if (def.currency !== currency) continue;
+        if (!s.autoBuy[def.id]) continue;
+        if (!autoBuyUnlocked(s, def.id)) continue;
+        if (!isUnlocked(s, def)) continue;
 
-      const cost = costAt(def, s.levels[def.id]);
-      // Recomputed each pass: the budget shrinks as the loop spends.
-      if (cost.gt(s.mass.mul(spendFraction))) continue;
-      if (!cheapest || cost.lt(cheapest)) {
-        cheapest = cost;
-        cheapestId = def.id;
+        const cost = costAt(def, s.levels[def.id]);
+        // Recomputed each pass: the budget shrinks as the loop spends.
+        if (cost.gt(walletFor(s, def).mul(spendFraction))) continue;
+        if (!cheapest || cost.lt(cheapest)) {
+          cheapest = cost;
+          cheapestId = def.id;
+        }
       }
-    }
 
-    if (!cheapestId) break;
-    if (buy(s, cheapestId, 1) === 0) break;
-    bought += 1;
+      if (!cheapestId) break;
+      if (buy(s, cheapestId, 1) === 0) break;
+      bought += 1;
+    }
   }
 
   return bought;
@@ -198,6 +260,7 @@ export function tick(s: GameState, dt: number): void {
 
   const rates = deriveRates(s);
   earn(s, rates.massPerSecond.mul(dt));
+  earnEnergy(s, rates.energyPerSecond.mul(dt));
   s.playTime += dt;
 
   // Both of these live inside the tick so that offline catch-up gets them for free: an
@@ -241,6 +304,10 @@ export function nextCost(s: GameState, id: UpgradeId): Num {
   return costAt(UPGRADES[id], s.levels[id]);
 }
 
+export function canAfford(s: GameState, id: UpgradeId): boolean {
+  return walletFor(s, UPGRADES[id]).gte(nextCost(s, id));
+}
+
 /**
  * Buy `count` levels, or as many as affordable when `count` is 'max'.
  * Returns how many were actually bought.
@@ -250,14 +317,15 @@ export function buy(s: GameState, id: UpgradeId, count: number | 'max' = 1): num
   if (!isUnlocked(s, def)) return 0;
 
   const level = s.levels[id];
+  const wallet = walletFor(s, def);
   const purchase =
     count === 'max'
-      ? maxAffordable(def, level, s.mass)
+      ? maxAffordable(def, level, wallet)
       : { levels: count, cost: costOfLevels(def, level, count) };
 
-  if (purchase.levels <= 0 || purchase.cost.gt(s.mass)) return 0;
+  if (purchase.levels <= 0 || purchase.cost.gt(wallet)) return 0;
 
-  s.mass = s.mass.sub(purchase.cost);
+  spend(s, def, purchase.cost);
   s.levels[id] = level + purchase.levels;
   s.stats.purchases += purchase.levels;
   return purchase.levels;

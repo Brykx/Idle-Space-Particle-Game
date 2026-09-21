@@ -30,6 +30,9 @@ export interface GameState {
   mass: Num;
   /** Never decreases. Drives unlocks, and later the prestige formula. */
   totalMassEver: Num;
+  /** Capital for the energy-side upgrades. Spending it never costs you an element tier. */
+  energy: Num;
+  totalEnergyEver: Num;
   levels: Record<UpgradeId, number>;
   /** Seconds of simulated time. The sim's only clock — no wall clock in here. */
   playTime: number;
@@ -61,6 +64,8 @@ export function initialState(now = Date.now()): GameState {
     version: SAVE_VERSION,
     mass: D(0),
     totalMassEver: D(0),
+    energy: D(0),
+    totalEnergyEver: D(0),
     levels,
     playTime: 0,
     pulseReadyAt: 0,
@@ -90,6 +95,8 @@ export function cloneState(s: GameState): GameState {
     ...s,
     mass: D(s.mass),
     totalMassEver: D(s.totalMassEver),
+    energy: D(s.energy),
+    totalEnergyEver: D(s.totalEnergyEver),
     levels: { ...s.levels },
     autoBuy: { ...s.autoBuy },
     achievements: [...s.achievements],

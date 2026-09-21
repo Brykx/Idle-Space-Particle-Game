@@ -261,6 +261,57 @@ high replay, and they exercise systems that already exist.
 
 ## Supporting systems
 
+### The energy economy
+
+Five planned features turned out to be one system: the disk is where energy comes from, the
+element chain is what it is for, and the two upgrades bought with energy bring the chain
+closer. Nothing here is worth shipping alone.
+
+**The disk** forms once the core is heavy enough to have one, and taxes the infall:
+
+```
+energyPerSecond = rawMassPerSecond × diskThroughput
+```
+
+*Raw* infall — before the element multiplier. That ordering is load-bearing, not cosmetic:
+energy decides the element tier, the tier multiplies mass income, and if mass income then fed
+energy the loop would close. It did, in the first attempt, and each tier funded the disk level
+that reached the next one. The whole chain fired in under a second.
+
+**The element chain** is gated on `diskThroughput` — the fraction of infall converted — not on
+energy per second. Absolute energy requirements looked right and were not: energy income is
+proportional to mass income, which spans twenty orders of magnitude over a run, so any fixed
+set of thresholds is crossed almost simultaneously somewhere in the middle. A fraction does
+not inflate, so tiers are paced by the disk's cost curve, which is a dial that behaves.
+
+| Tier | Element | mass/particle × | Throughput needed |
+|---|---|---|---|
+| 0 | Hydrogen | ×1.00 | — |
+| 1 | Helium | ×1.35 | 0.006% |
+| 2 | Carbon | ×1.80 | 0.15% |
+| 3 | Oxygen | ×2.40 | 3% |
+| 4 | Silicon | ×3.00 | 60% |
+| 5 | Iron | — | nothing reaches it |
+
+**Those multipliers look timid and are not.** With the mass upgrades' cost exponents summing
+to about 1, income tracks capital, so a flat multiplier scales the growth *rate* rather than
+the total. The first attempt gave the chain a ×1500 top end and made the entire game roughly
+seventy times faster — the last four stages arrived within one second of each other. A ×3
+chain is worth about a doubling of pace, which is already a lot. **This is the single easiest
+way to wreck the tuning, and it does not look dangerous while you are doing it.**
+
+**Energy is the stock.** It buys two things, and both bring the next element closer from
+opposite directions: *Accretion Disk* raises throughput, *Magnetic Confinement* lowers what
+each tier asks for. Spending the stock never costs a tier, so the two pressures never fight.
+
+**Iron is where it stops**, and that is astrophysics rather than a balance decision: fusing
+iron consumes energy instead of releasing it, so no throughput reaches it. It is listed with
+no requirement at all, the way the ladder lists the stages only a collapse can reach.
+
+The stall it causes is Phase 3's prestige prompt. Until prestige exists it is *only* the end
+of the chain — everything else keeps climbing, so there is no dead end. Shipping a real wall
+before there is a way through it would be the worst state to leave a player in.
+
 ### Automation
 
 **Auto-buyers** unlock per upgrade, at level 25 of that upgrade. Automation is earned where
@@ -296,6 +347,8 @@ capture, switching on automation, coming back after a day away.
   for this genre.
 - **Settings** — particle budget slider (perf and taste), reduced motion, auto-buy reserve,
   save export/import, hard reset behind a confirm.
+- **Tabs** — Core, Energy, Progress, Settings. The Energy tab does not exist until there is a
+  disk: a game that unfolds beats one that opens with four empty rooms.
 - **Audio** — low drone that thickens with mass, a pitched swell per stage, and one genuinely
   loud supernova. Muted by default; autoplay policies mean it must be anyway.
 

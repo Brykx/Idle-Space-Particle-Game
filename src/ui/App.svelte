@@ -5,12 +5,27 @@
   import Breakdown from './Breakdown.svelte';
   import Stages from './Stages.svelte';
   import Achievements from './Achievements.svelte';
+  import Elements from './Elements.svelte';
   import Settings from './Settings.svelte';
   import AwayDialog from './AwayDialog.svelte';
 
   const view = game.view;
 
   let stage: HTMLDivElement;
+
+  type Tab = 'core' | 'energy' | 'progress' | 'settings';
+  let tab = $state<Tab>('core');
+
+  // The Energy tab only exists once there is a disk. Keeping it out of the bar until then is
+  // the difference between a game that unfolds and one that starts with four empty rooms.
+  const tabs = $derived(
+    [
+      { id: 'core' as const, label: 'Core' },
+      ...(view.energyUnlocked ? [{ id: 'energy' as const, label: 'Energy' }] : []),
+      { id: 'progress' as const, label: 'Progress' },
+      { id: 'settings' as const, label: 'Settings' },
+    ],
+  );
 
   onMount(() => {
     void game.start(stage);
@@ -91,28 +106,63 @@
       </p>
     </header>
 
-    <div class="upgrades">
-      {#each view.upgrades as upgrade (upgrade.id)}
-        <UpgradeCard {upgrade} onbuy={game.buy} onautobuy={game.toggleAutoBuy} />
+    <nav class="tabs" aria-label="Sections">
+      {#each tabs as entry (entry.id)}
+        <button class:active={tab === entry.id} onclick={() => (tab = entry.id)}>
+          {entry.label}
+          {#if entry.id === 'energy' && view.nextElementName}
+            <span class="pip" aria-hidden="true"></span>
+          {/if}
+        </button>
       {/each}
-    </div>
+    </nav>
 
-    <Breakdown {view} />
+    {#if tab === 'core'}
+      <div class="upgrades">
+        {#each view.upgrades as upgrade (upgrade.id)}
+          <UpgradeCard {upgrade} onbuy={game.buy} onautobuy={game.toggleAutoBuy} />
+        {/each}
+      </div>
 
-    <Stages {view} />
+      <Breakdown {view} />
+    {:else if tab === 'energy'}
+      <div class="readouts">
+        <div>
+          <p class="label">Energy</p>
+          <p class="value num">{view.energy}</p>
+        </div>
+        <div>
+          <p class="label">Per second</p>
+          <p class="value num">+{view.energyPerSecond}</p>
+        </div>
+        <div>
+          <p class="label">Throughput</p>
+          <p class="value num">{view.throughput}</p>
+        </div>
+      </div>
 
-    <Achievements {view} />
+      <Elements {view} />
 
-    <Settings
-      {view}
-      onnotation={game.setNotation}
-      onbudget={game.setParticleBudget}
-      onreserve={game.setAutoBuyReserve}
-      onreducedmotion={game.setReducedMotion}
-      onexport={game.exportSave}
-      onimport={game.importSave}
-      onreset={game.hardReset}
-    />
+      <div class="upgrades">
+        {#each view.energyUpgrades as upgrade (upgrade.id)}
+          <UpgradeCard {upgrade} onbuy={game.buy} onautobuy={game.toggleAutoBuy} />
+        {/each}
+      </div>
+    {:else if tab === 'progress'}
+      <Stages {view} />
+      <Achievements {view} />
+    {:else}
+      <Settings
+        {view}
+        onnotation={game.setNotation}
+        onbudget={game.setParticleBudget}
+        onreserve={game.setAutoBuyReserve}
+        onreducedmotion={game.setReducedMotion}
+        onexport={game.exportSave}
+        onimport={game.importSave}
+        onreset={game.hardReset}
+      />
+    {/if}
   </aside>
 </main>
 
@@ -363,6 +413,73 @@
   .upgrades {
     display: grid;
     gap: 0.5rem;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.2rem;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: rgba(6, 9, 20, 0.6);
+  }
+
+  .tabs button {
+    position: relative;
+    flex: 1;
+    padding: 0.35rem 0.4rem;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    font-size: 0.78rem;
+    color: var(--dimmer);
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .tabs button:hover {
+    color: var(--dim);
+  }
+
+  .tabs button.active {
+    background: rgba(48, 70, 122, 0.55);
+    color: var(--text);
+  }
+
+  .pip {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.35rem;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--warm);
+  }
+
+  .readouts {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+  }
+
+  .readouts div {
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: rgba(9, 13, 26, 0.5);
+    padding: 0.5rem 0.55rem;
+  }
+
+  .readouts .label {
+    margin: 0;
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dimmer);
+  }
+
+  .readouts .value {
+    margin: 0.2rem 0 0;
+    font-size: 0.85rem;
+    color: var(--warm);
   }
 
   @media (max-width: 760px) {

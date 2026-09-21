@@ -9,6 +9,7 @@ src/
     state.ts           # GameState type + initialState()
     upgrades.ts        # upgrade defs as DATA (id, cost curve, effect, unlock)
     stages.ts          # the stage ladder as DATA (threshold, blurb, analogue, look)
+    elements.ts        # the fusion chain as DATA (multiplier, throughput needed)
     economy.ts         # deriveRates(state) -> Rates ; tick(state, dt)
     offline.ts         # catch-up integration + away summary
     prestige.ts        # reset layers, stardust/singularity formulas
@@ -126,10 +127,14 @@ awarded inside `tick` too, so an absence earns them, and the balance tool earns 
 as a player would. Their effect on pacing is therefore measured rather than assumed: the full
 set pulls the climb to Supergiant in from 1:25 to 1:07.
 
+**The energy economy — done.** Accretion disk, energy as a second currency, the element
+chain, Magnetic Confinement and Field Lines, and a tabbed side column to hold it. Written up
+in the design doc; the short version is that all of it is one system and none of it works
+alone. Three attempts at the coupling collapsed the ladder before the fourth held — see the
+risk table.
+
 Still to do:
 
-- **Accretion Disk** — an orbiting ring that sweeps particles passively; the first upgrade
-  that changes the field's *shape*
 - **Energy** — a second resource from fusion, with sinks mass cannot buy
 - **Element chain** — H → He → C → O → Fe, gating the star stages, multiplying mass per particle
 - **Magnetic Field** — catches charged particles gravity misses
@@ -186,6 +191,8 @@ gets looked at by a human, which is the honest way to test a particle field.
 | GC stutter in the field | Pre-allocated pool from the first commit; no per-particle allocation, ever |
 | Float drift / save corruption | Fixed timestep, Decimal in the economy, versioned saves, export string |
 | Balance collapses as systems stack | Every system multiplies one of four named terms; the cost exponents must keep summing to ~1, and `tests/balance.test.ts` compares the curve's early slope against its late slope to catch drift |
+| A flat multiplier silently rescales the whole game | With cost exponents summing to ~1, income tracks capital, so any constant multiplier changes the growth *rate*. A x1500 element chain made the game ~70x faster. Multipliers stay small, and `tests/energy.test.ts` asserts the top of the chain stays under x10 |
+| Feedback between the two currencies | Energy is taxed from the *raw* infall, before the element multiplier, so a tier can never fund the disk level that reaches the next tier. Gating tiers on throughput rather than on energy/second stops fixed thresholds from being crossed all at once as income inflates |
 | Offline quietly pays less than being present | Auto-buyers make income a feedback loop, so the catch-up step size now sets accuracy, not just speed. Steps are capped at half a second while automation is running (60s when it is not, where the rate barely moves), and a test asserts the integration is converged at that step |
 | Scope drift into Acts IV-V | Phases ship independently; the game is releasable from the end of Phase 3 |
 

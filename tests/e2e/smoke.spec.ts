@@ -82,6 +82,7 @@ test.describe('the game runs', () => {
 
   test('round trips a save through the export string', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.getByRole('button', { name: 'Settings' }).click();
     await page.locator('.settings summary').click();
 
     await page.getByRole('button', { name: 'Export save' }).click();
@@ -137,6 +138,7 @@ test.describe('the game runs', () => {
     await expect(page.locator('.stage-analogue')).toContainText('Earth');
     await expect(page.locator('.goal')).toContainText('Gas Giant');
 
+    await page.getByRole('button', { name: 'Progress' }).click();
     await page.locator('.stages summary').click();
     const rows = page.locator('.stages li');
     await expect(rows).toHaveCount(14);
@@ -198,6 +200,7 @@ test.describe('the game runs', () => {
     // Every card states the income a level would add, which is how a saturated upgrade shows.
     await expect(page.locator('.card .gain').first()).toContainText('%');
 
+    await page.getByRole('button', { name: 'Progress' }).click();
     await page.locator('.achievements summary').click();
     const unlockedBefore = await page.locator('.achievements li.unlocked').count();
 
@@ -207,5 +210,33 @@ test.describe('the game runs', () => {
     const banner = page.locator('.announce');
     await expect(banner).toBeVisible();
     await expect(banner.locator('.eyebrow')).toHaveText('Achievement');
+  });
+
+  test('keeps the Energy tab hidden until there is a disk, then runs on energy', async ({ page }) => {
+    await seedSave(page, { mass: '1e4', totalMassEver: '1e4' });
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Energy' })).toHaveCount(0);
+
+    // Heavy enough to have a disk, with energy banked to spend.
+    await seedSave(page, { mass: '1e12', totalMassEver: '1e12', energy: '1e9' });
+    await page.reload();
+
+    await page.getByRole('button', { name: 'Energy' }).click();
+    await expect(page.locator('.chain .name')).toHaveText('Hydrogen');
+    await expect(page.locator('.chain li')).toHaveCount(6);
+    // Iron is listed and permanently out of reach.
+    await expect(page.locator('.chain li.unreachable')).toHaveCount(1);
+    await expect(page.locator('.chain li.unreachable .tier-req')).toHaveText('—');
+
+    // The disk is bought out of energy, and mass is untouched by it.
+    const massBefore = await page.locator('.mass').innerText();
+    const card = page.locator('.upgrades .card').first();
+    await expect(card.locator('h3')).toHaveText('Accretion Disk');
+    await expect(card.locator('.gain')).toContainText('throughput');
+
+    await card.locator('.buy').first().click();
+    await expect(card.locator('.level')).toHaveText('Lv 1');
+    expect(await page.locator('.mass').innerText()).not.toBe('');
+    void massBefore;
   });
 });

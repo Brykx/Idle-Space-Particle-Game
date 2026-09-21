@@ -1,8 +1,9 @@
 import { format, formatDuration } from '../src/sim/numbers';
-import { buy, deriveRates, nextCost, pulse, pulseReady, tick, unlockedUpgrades } from '../src/sim/economy';
+import { buy, canAfford, deriveRates, nextCost, pulse, pulseReady, tick, unlockedUpgrades } from '../src/sim/economy';
 import { initialState, type GameState } from '../src/sim/state';
-import type { UpgradeId } from '../src/sim/upgrades';
+import { UPGRADES, type UpgradeId } from '../src/sim/upgrades';
 import { ACCRETION_STAGES } from '../src/sim/stages';
+import { REACHABLE_ELEMENTS } from '../src/sim/elements';
 
 /**
  * Headless pacing sim.
@@ -56,6 +57,7 @@ export interface PacingRun {
   /** The first hour, where a new player decides whether to stay. */
   firstHour: Feel;
   shape: ShapeSample[];
+  elements: Array<{ name: string; seconds: number }>;
 }
 
 export interface PacingOptions {
@@ -85,6 +87,17 @@ function paybackSeconds(s: GameState, id: UpgradeId): number {
 }
 
 /**
+ * Upgrades a player buys on sight rather than by payback.
+ *
+ * The energy-economy upgrades have step-shaped value: a disk level is worth nothing at all
+ * until it tips the core over a fusion threshold, at which point it is worth a great deal.
+ * Payback cannot see that, so the bot would never buy one — but a player, looking at a bar
+ * telling them how far off the next element is, obviously would. Modelling them as bought
+ * when affordable is the honest proxy.
+ */
+const BUY_ON_SIGHT = new Set(['energy', 'requirement']);
+
+/**
  * Spend down to nothing worth buying, under the given policy.
  *
  * Buys *max* of the chosen upgrade, because that is the button real players press. Returns
@@ -93,10 +106,19 @@ function paybackSeconds(s: GameState, id: UpgradeId): number {
  */
 function spend(s: GameState, policy: Policy): number {
   let decisions = 0;
+
+  // The progression upgrades first, whatever they cost, in either currency. They are not
+  // counted as decisions: their value is step-shaped and lands on a later tier crossing, so
+  // including them drags the "gain per purchase" median to zero and hides the real cadence.
+  for (const def of unlockedUpgrades(s)) {
+    if (!BUY_ON_SIGHT.has(def.term)) continue;
+    while (canAfford(s, def.id) && buy(s, def.id, 1) > 0) { /* bought on sight */ }
+  }
+
   for (;;) {
     const affordable = unlockedUpgrades(s)
       .map((def) => ({ id: def.id, cost: nextCost(s, def.id) }))
-      .filter((o) => o.cost.lte(s.mass));
+      .filter((o) => !BUY_ON_SIGHT.has(UPGRADES[o.id].term) && o.cost.lte(s.mass));
 
     if (affordable.length === 0) return decisions;
 
@@ -121,6 +143,8 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
   let next = 0;
 
   const decisionTimes: number[] = [];
+  const elementTimes: Array<{ name: string; seconds: number }> = [];
+  let elementSeen = 0;
   const shape: ShapeSample[] = [];
   let shapeAt = 0;
   const gains: number[] = [];
@@ -137,6 +161,14 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
       for (let i = 0; i < decisions; i++) decisionTimes.push(s.playTime);
       const after = deriveRates(s).massPerSecond;
       gains.push(after.div(incomeBefore).toNumber() - 1);
+    }
+
+    const tier = deriveRates(s).elementTier;
+    if (tier > elementSeen) {
+      for (let i = elementSeen + 1; i <= tier; i++) {
+        elementTimes.push({ name: REACHABLE_ELEMENTS[i]?.name ?? '?', seconds: s.playTime });
+      }
+      elementSeen = tier;
     }
 
     if (s.playTime >= shapeAt) {
@@ -173,7 +205,7 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
     }
   }
 
-  return { milestones: results, firstHour: feel(decisionTimes, gains, incomeLog, 3600), shape };
+  return { milestones: results, firstHour: feel(decisionTimes, gains, incomeLog, 3600), shape, elements: elementTimes };
 }
 
 function median(values: number[]): number {
@@ -225,6 +257,11 @@ function main(): void {
     const threshold = ACCRETION_STAGES.find((s) => s.id === r.id)?.threshold;
     const at = threshold ? format(threshold, 'scientific').padStart(10) : '';
     console.log(`  ${r.label.padEnd(14)} ${at}  ${formatDuration(r.seconds).padStart(9)}`);
+  }
+
+  if (run.elements.length > 0) {
+    console.log('\n  fusion reached\n');
+    for (const e of run.elements) console.log(`  ${e.name.padEnd(14)} ${formatDuration(e.seconds).padStart(9)}`);
   }
 
   console.log('\n  curve shape — log10(mass) every 5 minutes\n');

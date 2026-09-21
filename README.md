@@ -24,7 +24,13 @@ Phase 2 so far adds **particle trails** (each sprite stretched along its velocit
 reads in a single frame), **auto-buyers** unlocked per upgrade at level 25, and **23
 achievements**, each multiplying everything by 1.02.
 
-Next: the accretion disk, the Energy resource and the element chain.
+It also adds the **energy economy**: an accretion disk that taxes the infall, energy as a
+second currency, and a fusion chain from hydrogen to iron that multiplies what each captured
+particle is worth. The side column is now tabbed, and the Energy tab appears only once there
+is a disk.
+
+Next: the magnetic field's remaining role, and Phase 3's supernova prestige — which is also
+when the iron wall can safely land.
 
 ## Running it
 

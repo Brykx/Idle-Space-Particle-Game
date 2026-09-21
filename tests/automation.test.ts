@@ -122,8 +122,14 @@ describe('auto-buyers', () => {
     away.totalMassEver = D('1e9');
     applyOffline(away, NOW + 3600_000);
 
-    const orders = present.totalMassEver.log10() - away.totalMassEver.log10();
-    expect(Math.abs(orders)).toBeLessThan(0.1);
+    // Measured against what was *gained*, not in absolute orders of magnitude. An hour of
+    // compounding covers tens of orders, so a fixed absolute bound stops meaning anything as
+    // the tuning changes: a shortfall of 0.1 orders is enormous early and forty seconds'
+    // worth late. The relative figure is the one a player would feel.
+    const start = 9; // log10 of the seeded totalMassEver
+    const gainedPresent = present.totalMassEver.log10() - start;
+    const gainedAway = away.totalMassEver.log10() - start;
+    expect(Math.abs(gainedPresent - gainedAway) / gainedPresent).toBeLessThan(0.01);
   });
 
   /**
@@ -137,11 +143,13 @@ describe('auto-buyers', () => {
       s.mass = D(1e4);
       s.totalMassEver = D('1e9');
       for (let i = 0; i < Math.round(3600 / dt); i++) tick(s, dt);
-      return s.totalMassEver.log10();
+      return s.totalMassEver.log10() - 9;
     };
     // Halving the offline step must barely move the answer. If it does, the step has drifted
     // coarse and offline is quietly paying less — a failure that looks like working software.
-    expect(Math.abs(run(0.5) - run(0.25))).toBeLessThan(0.05);
+    const coarse = run(0.5);
+    const fine = run(0.25);
+    expect(Math.abs(fine - coarse) / fine).toBeLessThan(0.01);
   });
 });
 

@@ -29,6 +29,8 @@ export function serialize(s: GameState): SaveBlob {
     version: SAVE_VERSION,
     mass: s.mass.toString(),
     totalMassEver: s.totalMassEver.toString(),
+    energy: s.energy.toString(),
+    totalEnergyEver: s.totalEnergyEver.toString(),
     levels: { ...s.levels },
     autoBuy: { ...s.autoBuy },
     achievements: [...s.achievements],
@@ -100,6 +102,8 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
     ...base,
     mass: asDecimal(blob.mass, '0'),
     totalMassEver,
+    energy: asDecimal(blob.energy, '0'),
+    totalEnergyEver: asDecimal(blob.totalEnergyEver, '0'),
     playTime: Math.max(0, asFiniteNumber(blob.playTime, 0)),
     pulseReadyAt: Math.max(0, asFiniteNumber(blob.pulseReadyAt, 0)),
     // A save written before stages existed should not announce a backlog of them on load.

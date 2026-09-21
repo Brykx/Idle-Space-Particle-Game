@@ -35,7 +35,7 @@
        cannot tell; this is how the player sees it and switches one off. -->
   <div class="meta">
     <span class="term">next level</span>
-    <span class="gain num">{upgrade.gain} income</span>
+    <span class="gain num">{upgrade.gain}</span>
   </div>
 
   <div class="actions">

@@ -87,7 +87,10 @@ describe('pacing', () => {
 
     expect(early).toBeGreaterThan(0.05);
     expect(late / early).toBeGreaterThan(0.7);
-    expect(late / early).toBeLessThan(1.5);
+    // The upper bound allows a gentle late ramp, which the energy economy adds on purpose:
+    // each fusion tier is a step up in income, so the last stretch before the prestige prompt
+    // should quicken. What it still catches is a collapse, where the tail arrives at once.
+    expect(late / early).toBeLessThan(1.8);
   });
 
   it('keeps income visibly moving through the first hour', () => {
