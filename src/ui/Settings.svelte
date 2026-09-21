@@ -6,13 +6,15 @@
     view: View;
     onnotation: (n: Notation) => void;
     onbudget: (n: number) => void;
+    onreserve: (n: number) => void;
     onreducedmotion: (on: boolean) => void;
     onexport: () => string;
     onimport: (text: string) => boolean;
     onreset: () => void;
   }
 
-  const { view, onnotation, onbudget, onreducedmotion, onexport, onimport, onreset }: Props = $props();
+  const { view, onnotation, onbudget, onreserve, onreducedmotion, onexport, onimport, onreset }: Props =
+    $props();
 
   let saveText = $state('');
   let copied = $state(false);
@@ -66,6 +68,26 @@
 
   <p class="note">A graphics setting only — it cannot change how much mass you earn.</p>
 
+  {#if view.autoBuyersUnlocked > 0}
+    <div class="row">
+      <label for="reserve">Auto-buy reserve</label>
+      <div class="slider">
+        <input
+          id="reserve"
+          type="range"
+          min="0"
+          max="0.9"
+          step="0.05"
+          value={view.autoBuyReserve}
+          oninput={(event) => onreserve(Number(event.currentTarget.value))}
+        />
+        <span class="num">{(view.autoBuyReserve * 100).toFixed(0)}%</span>
+      </div>
+    </div>
+
+    <p class="note">Mass the auto-buyers will not touch, so you can save towards something by hand.</p>
+  {/if}
+
   <div class="row">
     <label for="motion">Reduced motion</label>
     <input
@@ -113,6 +135,7 @@
     <div><dt>Time played</dt><dd class="num">{view.playTime}</dd></div>
     <div><dt>Upgrades bought</dt><dd class="num">{view.purchases}</dd></div>
     <div><dt>Pulses fired</dt><dd class="num">{view.pulses}</dd></div>
+    <div><dt>Achievements</dt><dd class="num">{view.achievementsUnlocked}/{view.achievementCount}</dd></div>
   </dl>
 </details>
 

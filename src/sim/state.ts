@@ -8,6 +8,11 @@ export interface Settings {
   /** Maximum live particles. A graphics setting only — it cannot change income. */
   particleBudget: number;
   reducedMotion: boolean;
+  /**
+   * Fraction of your mass auto-buyers will not touch, so you can save towards something by
+   * hand while automation handles the cheap end. 0 means they spend freely.
+   */
+  autoBuyReserve: number;
 }
 
 export interface Stats {
@@ -15,6 +20,9 @@ export interface Stats {
   startedAt: number;
   pulses: number;
   purchases: number;
+  /** Longest single absence, in seconds. Achievements read it; nothing else does. */
+  longestAway: number;
+  exports: number;
 }
 
 export interface GameState {
@@ -29,6 +37,10 @@ export interface GameState {
   pulseReadyAt: number;
   /** Highest stage the player has been told about, so each one announces itself once. */
   stageSeen: number;
+  /** Which upgrades buy themselves. Unlocking is derived from level, so it is not stored. */
+  autoBuy: Record<UpgradeId, boolean>;
+  /** Ids of unlocked achievements. */
+  achievements: string[];
   /** Wall-clock ms at the last save. The one bridge to real time, used for offline catch-up. */
   lastSeen: number;
   settings: Settings;
@@ -39,7 +51,11 @@ export const PULSE_COOLDOWN = 10;
 
 export function initialState(now = Date.now()): GameState {
   const levels = {} as Record<UpgradeId, number>;
-  for (const id of UPGRADE_IDS) levels[id] = 0;
+  const autoBuy = {} as Record<UpgradeId, boolean>;
+  for (const id of UPGRADE_IDS) {
+    levels[id] = 0;
+    autoBuy[id] = false;
+  }
 
   return {
     version: SAVE_VERSION,
@@ -49,16 +65,21 @@ export function initialState(now = Date.now()): GameState {
     playTime: 0,
     pulseReadyAt: 0,
     stageSeen: 0,
+    autoBuy,
+    achievements: [],
     lastSeen: now,
     settings: {
       notation: 'letters',
       particleBudget: 1200,
       reducedMotion: false,
+      autoBuyReserve: 0,
     },
     stats: {
       startedAt: now,
       pulses: 0,
       purchases: 0,
+      longestAway: 0,
+      exports: 0,
     },
   };
 }
@@ -70,6 +91,8 @@ export function cloneState(s: GameState): GameState {
     mass: D(s.mass),
     totalMassEver: D(s.totalMassEver),
     levels: { ...s.levels },
+    autoBuy: { ...s.autoBuy },
+    achievements: [...s.achievements],
     settings: { ...s.settings },
     stats: { ...s.stats },
   };

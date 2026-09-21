@@ -5,9 +5,10 @@
   interface Props {
     upgrade: UpgradeView;
     onbuy: (id: UpgradeId, amount: number | 'max') => void;
+    onautobuy: (id: UpgradeId) => void;
   }
 
-  const { upgrade, onbuy }: Props = $props();
+  const { upgrade, onbuy, onautobuy }: Props = $props();
 
   const TERM_LABEL: Record<string, string> = {
     spawn: 'particles/s',
@@ -28,6 +29,13 @@
   <div class="meta">
     <span class="term">{TERM_LABEL[upgrade.term] ?? upgrade.term}</span>
     <span class="per">{upgrade.perLevel}</span>
+  </div>
+
+  <!-- What a level is actually worth right now. Capture upgrades saturate, and automation
+       cannot tell; this is how the player sees it and switches one off. -->
+  <div class="meta">
+    <span class="term">next level</span>
+    <span class="gain num">{upgrade.gain} income</span>
   </div>
 
   <div class="actions">
@@ -51,9 +59,28 @@
     </button>
   </div>
 
-  {#if !upgrade.affordable}
-    <p class="eta num">affordable in {upgrade.eta}</p>
-  {/if}
+  <div class="footer">
+    {#if !upgrade.affordable}
+      <span class="eta num">affordable in {upgrade.eta}</span>
+    {:else}
+      <span class="eta">&nbsp;</span>
+    {/if}
+
+    {#if upgrade.autoBuyUnlocked}
+      <label class="auto">
+        <input
+          type="checkbox"
+          checked={upgrade.autoBuy}
+          onchange={() => onautobuy(upgrade.id)}
+        />
+        auto
+      </label>
+    {:else}
+      <span class="auto locked" title="Auto-buy unlocks at level {upgrade.autoBuyAt}">
+        auto at Lv {upgrade.autoBuyAt}
+      </span>
+    {/if}
+  </div>
 </article>
 
 <style>
@@ -150,9 +177,42 @@
     color: var(--warm);
   }
 
+  .gain {
+    color: var(--good);
+  }
+
+  .footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+  }
+
   .eta {
-    margin: 0.45rem 0 0;
     font-size: 0.72rem;
     color: var(--dimmer);
+  }
+
+  .auto {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.72rem;
+    color: var(--dim);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .auto.locked {
+    color: var(--dimmer);
+    cursor: default;
+  }
+
+  .auto input {
+    accent-color: var(--accent);
+    width: 0.85rem;
+    height: 0.85rem;
+    margin: 0;
   }
 </style>

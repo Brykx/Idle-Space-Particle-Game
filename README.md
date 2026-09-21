@@ -20,8 +20,11 @@ ladder shows those two greyed out from the first minute.
 
 A full climb to the top of the visible ladder is about 85 minutes.
 
-Next in Phase 2: achievements, auto-buyers, the accretion disk, the Energy resource and the
-element chain.
+Phase 2 so far adds **particle trails** (each sprite stretched along its velocity, so movement
+reads in a single frame), **auto-buyers** unlocked per upgrade at level 25, and **23
+achievements**, each multiplying everything by 1.02.
+
+Next: the accretion disk, the Energy resource and the element chain.
 
 ## Running it
 

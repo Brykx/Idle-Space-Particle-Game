@@ -2,6 +2,7 @@ import { D } from './numbers';
 import { SAVE_VERSION, cloneState, initialState, type GameState } from './state';
 import { UPGRADE_IDS } from './upgrades';
 import { stageIndexFor } from './stages';
+import { ACHIEVEMENTS } from './achievements';
 
 /**
  * Serialisation, migration, and the export string.
@@ -29,6 +30,8 @@ export function serialize(s: GameState): SaveBlob {
     mass: s.mass.toString(),
     totalMassEver: s.totalMassEver.toString(),
     levels: { ...s.levels },
+    autoBuy: { ...s.autoBuy },
+    achievements: [...s.achievements],
     playTime: s.playTime,
     pulseReadyAt: s.pulseReadyAt,
     stageSeen: s.stageSeen,
@@ -76,9 +79,18 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
   const base = initialState(now);
 
   const levelsRaw = (blob.levels ?? {}) as Record<string, unknown>;
+  const autoBuyRaw = (blob.autoBuy ?? {}) as Record<string, unknown>;
   for (const id of UPGRADE_IDS) {
     base.levels[id] = Math.max(0, Math.floor(asFiniteNumber(levelsRaw[id], 0)));
+    base.autoBuy[id] = autoBuyRaw[id] === true;
   }
+
+  // Only ids this build knows about: an achievement removed in a later version should not
+  // linger in the save handing out a multiplier for something that no longer exists.
+  const known = new Set(ACHIEVEMENTS.map((a) => a.id));
+  const achievements = Array.isArray(blob.achievements)
+    ? [...new Set(blob.achievements.filter((id): id is string => typeof id === 'string' && known.has(id)))]
+    : [];
 
   const settings = (blob.settings ?? {}) as Record<string, unknown>;
   const stats = (blob.stats ?? {}) as Record<string, unknown>;
@@ -92,6 +104,7 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
     pulseReadyAt: Math.max(0, asFiniteNumber(blob.pulseReadyAt, 0)),
     // A save written before stages existed should not announce a backlog of them on load.
     stageSeen: Math.max(0, Math.floor(asFiniteNumber(blob.stageSeen, stageIndexFor(totalMassEver)))),
+    achievements,
     lastSeen: asFiniteNumber(blob.lastSeen, now),
     settings: {
       notation:
@@ -100,11 +113,14 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
           : base.settings.notation,
       particleBudget: Math.min(20000, Math.max(0, asFiniteNumber(settings.particleBudget, base.settings.particleBudget))),
       reducedMotion: settings.reducedMotion === true,
+      autoBuyReserve: Math.min(0.9, Math.max(0, asFiniteNumber(settings.autoBuyReserve, 0))),
     },
     stats: {
       startedAt: asFiniteNumber(stats.startedAt, base.stats.startedAt),
       pulses: Math.max(0, Math.floor(asFiniteNumber(stats.pulses, 0))),
       purchases: Math.max(0, Math.floor(asFiniteNumber(stats.purchases, 0))),
+      longestAway: Math.max(0, asFiniteNumber(stats.longestAway, 0)),
+      exports: Math.max(0, Math.floor(asFiniteNumber(stats.exports, 0))),
     },
   };
 }
@@ -123,6 +139,7 @@ const EXPORT_PREFIX = 'ISPG1|';
 
 /** A paste-able save string: prefix, checksum, base64 of the JSON. */
 export function exportSave(s: GameState): string {
+  s.stats.exports += 1;
   const json = JSON.stringify(serialize(s));
   const body = btoa(unescape(encodeURIComponent(json)));
   return `${EXPORT_PREFIX}${checksum(json)}|${body}`;

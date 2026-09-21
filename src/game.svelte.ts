@@ -1,5 +1,7 @@
 import { format, formatDuration, type Notation } from './sim/numbers';
 import {
+  AUTO_BUY_LEVEL,
+  autoBuyUnlocked,
   buy,
   deriveRates,
   isUnlocked,
@@ -7,6 +9,7 @@ import {
   pulse as pulseEconomy,
   tick,
 } from './sim/economy';
+import { ACHIEVEMENTS, multiplierFor } from './sim/achievements';
 import { initialState, type GameState } from './sim/state';
 import { UPGRADE_LIST, maxAffordable, type UpgradeId } from './sim/upgrades';
 import { applyOffline, type AwayReport } from './sim/offline';
@@ -32,8 +35,10 @@ const TICK = 1 / 20;
 const UI_INTERVAL = 1 / 12;
 const FIELD_INTERVAL = 1 / 4;
 const AUTOSAVE_INTERVAL = 10;
-/** How long a stage announcement stays on screen. */
-const ANNOUNCE_SECONDS = 7;
+/** How long an announcement stays on screen. */
+const ANNOUNCE_SECONDS = 5;
+/** More than this unlocking at once is summarised rather than queued one by one. */
+const ANNOUNCE_BATCH_LIMIT = 2;
 /** A gap larger than this is treated as an absence and credited through the offline path. */
 const OFFLINE_THRESHOLD = 2;
 
@@ -50,6 +55,19 @@ export interface UpgradeView {
   maxCost: string;
   /** Seconds until affordable, already formatted. Empty when affordable now. */
   eta: string;
+  /** What one more level does to income, e.g. "+4.2%". Shows when an upgrade has gone flat. */
+  gain: string;
+  autoBuy: boolean;
+  autoBuyUnlocked: boolean;
+  /** Level this upgrade must reach before it will buy itself. */
+  autoBuyAt: number;
+}
+
+export interface AchievementRowView {
+  id: string;
+  name: string;
+  how: string;
+  unlocked: boolean;
 }
 
 export interface StageRowView {
@@ -75,9 +93,18 @@ export interface View {
   nextStageThreshold: string;
   stages: StageRowView[];
 
-  /** Set when a stage is reached; clears itself after a few seconds. */
+  /** Set when something is unlocked; clears itself after a few seconds. */
+  announceEyebrow: string;
   announceTitle: string;
   announceBody: string;
+
+  achievements: AchievementRowView[];
+  achievementsUnlocked: number;
+  achievementCount: number;
+  achievementMultiplier: string;
+
+  autoBuyReserve: number;
+  autoBuyersUnlocked: number;
 
   spawnRate: string;
   captureFraction: string;
@@ -118,8 +145,15 @@ function emptyView(): View {
     nextStageName: '',
     nextStageThreshold: '',
     stages: [],
+    announceEyebrow: '',
     announceTitle: '',
     announceBody: '',
+    achievements: [],
+    achievementsUnlocked: 0,
+    achievementCount: ACHIEVEMENTS.length,
+    achievementMultiplier: 'x1.00',
+    autoBuyReserve: 0,
+    autoBuyersUnlocked: 0,
     spawnRate: '0',
     captureFraction: '0%',
     massPerParticle: '0',
@@ -157,6 +191,9 @@ function createGame() {
   let saveTimer = 0;
   let messageTimer = 0;
   let announceTimer = 0;
+  const announcements: Array<{ eyebrow: string; title: string; body: string }> = [];
+  /** How many unlocked achievements have already been announced. */
+  let achievementsAnnounced = 0;
 
   // ---------------------------------------------------------------- loading and saving
 
@@ -169,6 +206,7 @@ function createGame() {
     try {
       state = deserialize(raw);
       const stageBefore = stageIndexFor(state.totalMassEver);
+      achievementsAnnounced = state.achievements.length;
       const report = applyOffline(state);
       if (report) showAway(report, stageBefore);
     } catch (error) {
@@ -200,9 +238,20 @@ function createGame() {
     messageTimer = 6;
   }
 
-  function announce(title: string, body: string): void {
-    view.announceTitle = title;
-    view.announceBody = body;
+  /**
+   * Announcements queue rather than overwrite: a long absence can land a stage promotion and
+   * several achievements at once, and the last one winning would hide the rest.
+   */
+  function announce(eyebrow: string, title: string, body: string): void {
+    announcements.push({ eyebrow, title, body });
+  }
+
+  function showNextAnnouncement(): void {
+    const next = announcements.shift();
+    if (!next) return;
+    view.announceEyebrow = next.eyebrow;
+    view.announceTitle = next.title;
+    view.announceBody = next.body;
     announceTimer = ANNOUNCE_SECONDS;
   }
 
@@ -238,7 +287,7 @@ function createGame() {
     // absence — only the highest is worth saying.
     if (progress.index > state.stageSeen) {
       state.stageSeen = progress.index;
-      announce(progress.stage.name, progress.stage.blurb);
+      announce('You are now', progress.stage.name, progress.stage.blurb);
     }
 
     view.spawnRate = rates.spawnRate.toFixed(1);
@@ -256,6 +305,14 @@ function createGame() {
           ? Infinity
           : cost.sub(state.mass).div(rates.massPerSecond).toNumber();
 
+      // What one more level actually does. Cheapest-first automation cannot tell that an
+      // upgrade has saturated, so the player needs to be able to.
+      const probe: GameState = {
+        ...state,
+        levels: { ...state.levels, [def.id]: state.levels[def.id] + 1 },
+      };
+      const gainFraction = deriveRates(probe).massPerSecond.div(rates.massPerSecond).toNumber() - 1;
+
       return {
         id: def.id,
         name: def.name,
@@ -268,8 +325,37 @@ function createGame() {
         maxLevels: best.levels,
         maxCost: format(best.cost, notation),
         eta: affordable ? '' : formatDuration(seconds),
+        gain: `+${(gainFraction * 100).toFixed(gainFraction < 0.01 ? 2 : 1)}%`,
+        autoBuy: state.autoBuy[def.id],
+        autoBuyUnlocked: autoBuyUnlocked(state, def.id),
+        autoBuyAt: AUTO_BUY_LEVEL,
       };
     });
+
+    const unlocked = new Set(state.achievements);
+    view.achievements = ACHIEVEMENTS.map((achievement) => ({
+      id: achievement.id,
+      name: achievement.name,
+      how: achievement.how,
+      unlocked: unlocked.has(achievement.id),
+    }));
+    view.achievementsUnlocked = state.achievements.length;
+    view.achievementMultiplier = `x${multiplierFor(state.achievements.length).toFixed(2)}`;
+    view.autoBuyReserve = state.settings.autoBuyReserve;
+    view.autoBuyersUnlocked = UPGRADE_LIST.filter((def) => autoBuyUnlocked(state, def.id)).length;
+
+    if (state.achievements.length > achievementsAnnounced) {
+      const fresh = state.achievements.slice(achievementsAnnounced);
+      achievementsAnnounced = state.achievements.length;
+      if (fresh.length > ANNOUNCE_BATCH_LIMIT) {
+        announce('Achievements', `${fresh.length} unlocked`, 'Everything you earned while you were away.');
+      } else {
+        for (const id of fresh) {
+          const achievement = ACHIEVEMENTS.find((a) => a.id === id);
+          if (achievement) announce('Achievement', achievement.name, achievement.how);
+        }
+      }
+    }
 
     view.pulseReady = state.playTime >= state.pulseReadyAt;
     view.pulseCooldown = Math.max(0, state.pulseReadyAt - state.playTime);
@@ -352,10 +438,12 @@ function createGame() {
     if (announceTimer > 0) {
       announceTimer -= dt;
       if (announceTimer <= 0) {
+        view.announceEyebrow = '';
         view.announceTitle = '';
         view.announceBody = '';
       }
     }
+    if (announceTimer <= 0) showNextAnnouncement();
 
     if (running) frameHandle = requestAnimationFrame(step);
   }
@@ -414,6 +502,17 @@ function createGame() {
     pulse(): void {
       if (pulseEconomy(state) === null) return;
       field?.pulse();
+      refreshView();
+    },
+
+    toggleAutoBuy(id: UpgradeId): void {
+      if (!autoBuyUnlocked(state, id)) return;
+      state.autoBuy[id] = !state.autoBuy[id];
+      refreshView();
+    },
+
+    setAutoBuyReserve(fraction: number): void {
+      state.settings.autoBuyReserve = Math.max(0, Math.min(0.9, fraction));
       refreshView();
     },
 

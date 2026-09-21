@@ -17,14 +17,19 @@ const stage = (id: string): PacingResult => {
   return found;
 };
 
-/** log10(mass) at a given minute, from the shape samples. */
-const logAt = (minutes: number): number => {
-  const sorted: ShapeSample[] = run.shape;
-  let best = sorted[0];
-  for (const sample of sorted) {
-    if (sample.minutes <= minutes) best = sample;
-  }
-  return best?.log10 ?? 0;
+/**
+ * Orders of magnitude gained per minute between two shape samples.
+ *
+ * Indexed by sample rather than by clock time on purpose. The run stops once the last stage
+ * is reached, so a fixed window like "minute 50 to 80" silently becomes "minute 50 to
+ * whenever it ended, divided by 30" as the tuning gets faster — which flatters or punishes
+ * the late slope for no reason.
+ */
+const slopeBetween = (from: number, to: number): number => {
+  const a: ShapeSample | undefined = run.shape[from];
+  const b: ShapeSample | undefined = run.shape[to];
+  if (!a || !b || b.minutes <= a.minutes) return 0;
+  return (b.log10 - a.log10) / (b.minutes - a.minutes);
 };
 
 describe('pacing', () => {
@@ -70,12 +75,19 @@ describe('pacing', () => {
    * seconds apart. Comparing the slope early against the slope late catches both.
    */
   it('climbs at a steady rate rather than stalling or blowing up', () => {
-    const early = (logAt(50) - logAt(20)) / 30;
-    const late = (logAt(80) - logAt(50)) / 30;
+    // Skip the opening, where the saturating capture upgrades make the curve legitimately
+    // steep, then compare the first half of what remains against the second.
+    const first = 3;
+    const last = run.shape.length - 1;
+    const middle = Math.floor((first + last) / 2);
+    expect(last - first, 'not enough shape samples to judge the curve').toBeGreaterThan(5);
+
+    const early = slopeBetween(first, middle);
+    const late = slopeBetween(middle, last);
 
     expect(early).toBeGreaterThan(0.05);
-    expect(late / early).toBeGreaterThan(0.6);
-    expect(late / early).toBeLessThan(1.8);
+    expect(late / early).toBeGreaterThan(0.7);
+    expect(late / early).toBeLessThan(1.5);
   });
 
   it('keeps income visibly moving through the first hour', () => {

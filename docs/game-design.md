@@ -261,16 +261,43 @@ high replay, and they exercise systems that already exist.
 
 ## Supporting systems
 
-- **Achievements** (~60), each a small global bonus. The cheapest retention mechanic there is.
-- **Milestones** — automatic unlocks at mass thresholds; how the game teaches itself without
-  tutorial text.
-- **Statistics** — playtime, total mass ever, best run, prestige count, time-to-milestone.
+### Automation
+
+**Auto-buyers** unlock per upgrade, at level 25 of that upgrade. Automation is earned where
+you have already invested, which makes it a reward for engaging with an upgrade rather than a
+single milestone that hands the game over.
+
+The priority rule is cheapest-first, and it self-balances: buying the cheapest raises its
+cost, so spending spreads across everything enabled and keeps the next costs roughly level.
+Its blind spot is saturation — Gravity Well feeds a capture fraction that asymptotes, and
+cheapest-first would happily pour income into it forever. So every upgrade card shows what
+one more level does to income, and the per-upgrade toggle is how the player acts on it. The
+information and the control are the same feature.
+
+A **reserve** slider holds back a fraction of your mass, so automation can handle the cheap
+end while you save towards something by hand.
+
+### Achievements
+
+23 so far, of a planned ~60. Each multiplies everything by 1.02.
+
+That sounds small and is not: a constant multiplier scales the growth *rate*, not just the
+total, so across a run that gains 26 orders of magnitude a single 2% achievement is worth
+about half an order. The full set pulls the climb to Supergiant in from 1:25 to 1:07.
+
+They avoid mirroring the stage ladder, which already rewards getting heavier. These are about
+what you did to get there: pulses fired, levels bought, crossing half and then ninety percent
+capture, switching on automation, coming back after a day away.
+
+### The rest
+
+- **Statistics** — playtime, purchases, pulses, achievements.
 - **Number notation** — scientific / engineering / letters, player's choice. Non-negotiable
   for this genre.
-- **Settings** — particle budget slider (perf and taste), reduced motion, save export/import,
-  hard reset behind a confirm.
-- **Audio** — low drone that thickens with mass, a pitched swell per element tier, and one
-  genuinely loud supernova. Muted by default; autoplay policies mean it must be anyway.
+- **Settings** — particle budget slider (perf and taste), reduced motion, auto-buy reserve,
+  save export/import, hard reset behind a confirm.
+- **Audio** — low drone that thickens with mass, a pitched swell per stage, and one genuinely
+  loud supernova. Muted by default; autoplay policies mean it must be anyway.
 
 ## Accessibility and performance targets
 

@@ -4,6 +4,7 @@
   import UpgradeCard from './UpgradeCard.svelte';
   import Breakdown from './Breakdown.svelte';
   import Stages from './Stages.svelte';
+  import Achievements from './Achievements.svelte';
   import Settings from './Settings.svelte';
   import AwayDialog from './AwayDialog.svelte';
 
@@ -54,7 +55,7 @@
 
     {#if view.announceTitle}
       <div class="announce" role="status">
-        <p class="eyebrow">You are now</p>
+        <p class="eyebrow">{view.announceEyebrow}</p>
         <p class="title">{view.announceTitle}</p>
         <p class="body">{view.announceBody}</p>
       </div>
@@ -92,7 +93,7 @@
 
     <div class="upgrades">
       {#each view.upgrades as upgrade (upgrade.id)}
-        <UpgradeCard {upgrade} onbuy={game.buy} />
+        <UpgradeCard {upgrade} onbuy={game.buy} onautobuy={game.toggleAutoBuy} />
       {/each}
     </div>
 
@@ -100,10 +101,13 @@
 
     <Stages {view} />
 
+    <Achievements {view} />
+
     <Settings
       {view}
       onnotation={game.setNotation}
       onbudget={game.setParticleBudget}
+      onreserve={game.setAutoBuyReserve}
       onreducedmotion={game.setReducedMotion}
       onexport={game.exportSave}
       onimport={game.importSave}

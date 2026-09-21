@@ -107,12 +107,29 @@ properties (size and anchor live in `vertex`), so per-frame scale changes had ne
 uploaded and every particle had been rendering at the size set when the pool was built. The
 per-particle size variation had been dead since Phase 1.
 
+**Auto-buyers — done.** Each upgrade buys itself once you have taken it to level 25 by hand,
+so automation is earned per upgrade rather than handed over at a milestone. Cheapest-first is
+the priority rule: buying the cheapest raises its cost, so spending spreads itself and keeps
+the frontier level. What it cannot do is notice that an upgrade has saturated — Gravity Well
+would absorb income forever — so every card now shows what one more level does to income, and
+the per-upgrade toggle is how you act on it. A reserve slider keeps a fraction of your mass
+back for manual purchases.
+
+They run inside `tick`, which is what makes an absence buy upgrades exactly as being present
+would — and which turned the offline step size from a performance knob into a correctness
+one. See the risk table.
+
+**Achievements — 23 of a planned ~60.** Each multiplies everything by 1.02. Deliberately not
+a mirror of the stage ladder, which already rewards getting heavier: these are about what you
+did to get there — pulses fired, levels bought, capture fraction crossed, time away. They are
+awarded inside `tick` too, so an absence earns them, and the balance tool earns them exactly
+as a player would. Their effect on pacing is therefore measured rather than assumed: the full
+set pulls the climb to Supergiant in from 1:25 to 1:07.
+
 Still to do:
 
-- **Achievements** (~60), each a small global bonus
 - **Accretion Disk** — an orbiting ring that sweeps particles passively; the first upgrade
   that changes the field's *shape*
-- **Auto-buyers** — per upgrade, unlocked individually, with on/off and a priority rule
 - **Energy** — a second resource from fusion, with sinks mass cannot buy
 - **Element chain** — H → He → C → O → Fe, gating the star stages, multiplying mass per particle
 - **Magnetic Field** — catches charged particles gravity misses
@@ -169,6 +186,7 @@ gets looked at by a human, which is the honest way to test a particle field.
 | GC stutter in the field | Pre-allocated pool from the first commit; no per-particle allocation, ever |
 | Float drift / save corruption | Fixed timestep, Decimal in the economy, versioned saves, export string |
 | Balance collapses as systems stack | Every system multiplies one of four named terms; the cost exponents must keep summing to ~1, and `tests/balance.test.ts` compares the curve's early slope against its late slope to catch drift |
+| Offline quietly pays less than being present | Auto-buyers make income a feedback loop, so the catch-up step size now sets accuracy, not just speed. Steps are capped at half a second while automation is running (60s when it is not, where the rate barely moves), and a test asserts the integration is converged at that step |
 | Scope drift into Acts IV-V | Phases ship independently; the game is releasable from the end of Phase 3 |
 
 ## Suggested first commit after approval

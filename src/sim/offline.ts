@@ -1,21 +1,40 @@
 import { D, type Num } from './numbers';
-import { tick } from './economy';
+import { autoBuyersOn, tick } from './economy';
 import type { GameState } from './state';
 
 /**
  * Offline progress.
  *
- * The rate is currently constant between purchases, so this could be one multiply. It is a
- * loop anyway: once auto-buyers land in Phase 2 the rate changes *during* the gap, and a
- * loop that was always here stays correct for free.
+ * Auto-buyers changed what this loop is for. Before them the rate was constant across a gap
+ * and any step size gave the same answer; now the rate changes *during* the gap, because
+ * income buys upgrades which raise income. That feedback makes the step size an accuracy
+ * question, and coarse steps systematically under-pay: a step earns at the rate it started
+ * with and only then spends, so the longer the step the more compounding is lost.
  *
- * A fixed step count means a two-week absence costs the same as a two-minute one.
+ * Measured, the shortfall is about 0.04 orders of magnitude per second of step size over an
+ * hour. A thousand steps regardless of gap length — the obvious way to bound the work — put
+ * a 12-hour absence on 43-second steps and quietly paid it fifty times less than being
+ * present would have. So the step size is capped instead of the step count, and the work is
+ * bounded by the offline cap below rather than by throwing away accuracy.
  */
 
 /** Credit at most this much of an absence. */
 export const MAX_OFFLINE_SECONDS = 12 * 3600;
-/** However long the gap, resolve it in at most this many steps. */
-const MAX_STEPS = 1000;
+
+/**
+ * Step size, chosen by whether automation is running.
+ *
+ * With no auto-buyers the rate only moves when an achievement unlocks, which is a rare
+ * discrete jump, so a coarse step is both exact enough and nearly free. With auto-buyers the
+ * rate compounds continuously and the step size sets the error directly: measured over 12
+ * hours, 2-second steps lose about 0.45 orders of magnitude and half-second steps about 0.1.
+ *
+ * Half a second costs roughly a quarter of a second of catch-up at the 12-hour cap, once, on
+ * load. The residual is a small under-payment for being away rather than present — bounded,
+ * deliberate, and the thing Phase 3's offline-efficiency upgrade is there to buy back.
+ */
+const STEP_SECONDS_IDLE = 60;
+const STEP_SECONDS_AUTOMATED = 0.5;
 /** Ignore absences shorter than this; there is nothing to report. */
 const MIN_REPORTABLE_SECONDS = 5;
 
@@ -43,7 +62,12 @@ export function applyOffline(s: GameState, now = Date.now()): AwayReport | null 
   const creditedSeconds = Math.min(awaySeconds, MAX_OFFLINE_SECONDS);
   const before = D(s.totalMassEver);
 
-  const steps = Math.max(1, Math.min(MAX_STEPS, Math.ceil(creditedSeconds)));
+  // Recorded before the catch-up, not after: achievements are awarded inside `tick`, so a
+  // stat written afterwards would not be seen until the next one.
+  s.stats.longestAway = Math.max(s.stats.longestAway, awaySeconds);
+
+  const stepSeconds = autoBuyersOn(s) > 0 ? STEP_SECONDS_AUTOMATED : STEP_SECONDS_IDLE;
+  const steps = Math.max(1, Math.ceil(creditedSeconds / stepSeconds));
   const dt = creditedSeconds / steps;
   for (let i = 0; i < steps; i++) tick(s, dt);
 

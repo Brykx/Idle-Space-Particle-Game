@@ -161,4 +161,51 @@ test.describe('the game runs', () => {
     await expect(banner.locator('.title')).toHaveText('Pebble');
     await expect(page.locator('.stage-name')).toHaveText('Pebble');
   });
+
+  test('unlocks auto-buy by investing, then spends on your behalf', async ({ page }) => {
+    // Gravity Well one level short of its auto-buy threshold, with mass to spend.
+    await seedSave(page, {
+      mass: '1e9',
+      totalMassEver: '1e9',
+      levels: { gravity: 24 },
+      achievements: [],
+    });
+    await page.reload();
+
+    const card = page.locator('.card').first();
+    await expect(card.locator('.auto.locked')).toContainText('auto at Lv 25');
+
+    await card.locator('.buy').first().click();
+    await expect(card.locator('.level')).toHaveText('Lv 25');
+
+    const toggle = card.locator('.auto input');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).not.toBeChecked();
+
+    await toggle.check();
+    // Once it is on, the level climbs with no further clicks.
+    await expect
+      .poll(async () => Number((await card.locator('.level').innerText()).replace('Lv ', '')), {
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(25);
+  });
+
+  test('shows what a level is worth, and unlocks achievements', async ({ page }) => {
+    await seedSave(page, { mass: '1e6', totalMassEver: '1e6', levels: { gravity: 10 } });
+    await page.reload();
+
+    // Every card states the income a level would add, which is how a saturated upgrade shows.
+    await expect(page.locator('.card .gain').first()).toContainText('%');
+
+    await page.locator('.achievements summary').click();
+    const unlockedBefore = await page.locator('.achievements li.unlocked').count();
+
+    await page.locator('.pulse').click();
+    await expect(page.locator('.achievements li.unlocked')).not.toHaveCount(unlockedBefore);
+
+    const banner = page.locator('.announce');
+    await expect(banner).toBeVisible();
+    await expect(banner.locator('.eyebrow')).toHaveText('Achievement');
+  });
 });
