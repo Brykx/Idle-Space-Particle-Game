@@ -8,6 +8,7 @@ src/
     numbers.ts         # Decimal wrapper + notation formatting
     state.ts           # GameState type + initialState()
     upgrades.ts        # upgrade defs as DATA (id, cost curve, effect, unlock)
+    stages.ts          # the stage ladder as DATA (threshold, blurb, analogue, look)
     economy.ts         # deriveRates(state) -> Rates ; tick(state, dt)
     offline.ts         # catch-up integration + away summary
     prestige.ts        # reset layers, stardust/singularity formulas
@@ -81,10 +82,30 @@ Shipped: 39 unit tests, 7 browser smoke tests, and a pacing report wired into CI
 went through three passes before the curve held its shape — see the balance section of the
 design doc.
 
-### Phase 2 — Depth and automation (~3 days) ← *next*
-Milestones, achievements, accretion disk, auto-buyers with toggles and priority, statistics
-panel, settings (particle budget, notation, reduced motion), Energy + the element chain,
-magnetic field, the iron wall.
+### Phase 2 — Depth and automation ← *in progress*
+
+**Stage ladder — done.** Fourteen stages from dust to black hole, driven by lifetime mass,
+each with its own core appearance that the renderer morphs between. It replaces the milestone
+system rather than sitting alongside it: the stages *are* the milestones, they are the list
+the balance tool reports against, and the two stages a collapse brings are shown greyed from
+the first minute so the supernova is visible long before it is reachable.
+
+Landing it meant retuning the economy. The ladder made an existing flaw impossible to ignore
+— Density's additive effect decayed against an exponential cost, so minutes 5 to 25 gained
+2.3 orders of magnitude while the following 15 gained 8, and five stages would have flown past
+in seven minutes. Density is now multiplicative, the late-game cost exponents sum to 0.998,
+and the curve is straight. See the balance section of the design doc.
+
+Still to do:
+
+- **Achievements** (~60), each a small global bonus
+- **Accretion Disk** — an orbiting ring that sweeps particles passively; the first upgrade
+  that changes the field's *shape*
+- **Auto-buyers** — per upgrade, unlocked individually, with on/off and a priority rule
+- **Energy** — a second resource from fusion, with sinks mass cannot buy
+- **Element chain** — H → He → C → O → Fe, gating the star stages, multiplying mass per particle
+- **Magnetic Field** — catches charged particles gravity misses
+- **The iron wall** — fusing iron costs energy; the rate stalls, and that is the prestige prompt
 
 **Done when:** a 6-hour session has something new every ~20 minutes.
 
@@ -92,14 +113,16 @@ magnetic field, the iron wall.
 Reset layers, stardust formula, the permanent tree, nebula restart state, the supernova
 sequence itself. Tab navigation arrives here, because now there is enough to need it.
 
-**Done when:** run 2 reaches ignition in under a third of run 1's time and feels different
-doing it.
+**Done when:** run 2 reaches the Brown Dwarf stage in under a third of run 1's time and feels
+different doing it.
 
 ### Phase 4 — Visual pass (~2-3 days)
-Custom shaders for core glow and bloom, particle trails, element-driven palette, camera
-easing, audio layer. The Phase 1 renderer interface means this touches `render/` only.
+Custom shaders for core glow and bloom, particle trails, camera easing, audio layer. The
+stage ladder gives this a concrete brief: fourteen distinct core appearances, of which the
+current build has fourteen colour-and-size variations and no surface detail. The Phase 1
+renderer interface means this touches `render/` only.
 
-**Done when:** the ignition moment is worth recording.
+**Done when:** the moment the core ignites is worth recording.
 
 ### Phase 5 — Black hole + challenges (~3 days)
 Second prestige, Hawking radiation, jets, time dilation, lensing shader, the challenge
@@ -131,7 +154,7 @@ gets looked at by a human, which is the honest way to test a particle field.
 | Fun doesn't survive the slice | Phase 1 is deliberately front-loaded; retune or rethink before content exists |
 | GC stutter in the field | Pre-allocated pool from the first commit; no per-particle allocation, ever |
 | Float drift / save corruption | Fixed timestep, Decimal in the economy, versioned saves, export string |
-| Balance collapses as systems stack | Every system multiplies one of four named terms; `tools/balance.ts` re-runs in CI |
+| Balance collapses as systems stack | Every system multiplies one of four named terms; the cost exponents must keep summing to ~1, and `tests/balance.test.ts` compares the curve's early slope against its late slope to catch drift |
 | Scope drift into Acts IV-V | Phases ship independently; the game is releasable from the end of Phase 3 |
 
 ## Suggested first commit after approval

@@ -1,6 +1,7 @@
 import { D } from './numbers';
 import { SAVE_VERSION, cloneState, initialState, type GameState } from './state';
 import { UPGRADE_IDS } from './upgrades';
+import { stageIndexFor } from './stages';
 
 /**
  * Serialisation, migration, and the export string.
@@ -30,6 +31,7 @@ export function serialize(s: GameState): SaveBlob {
     levels: { ...s.levels },
     playTime: s.playTime,
     pulseReadyAt: s.pulseReadyAt,
+    stageSeen: s.stageSeen,
     lastSeen: s.lastSeen,
     settings: { ...s.settings },
     stats: { ...s.stats },
@@ -80,13 +82,16 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
 
   const settings = (blob.settings ?? {}) as Record<string, unknown>;
   const stats = (blob.stats ?? {}) as Record<string, unknown>;
+  const totalMassEver = asDecimal(blob.totalMassEver, '0');
 
   return {
     ...base,
     mass: asDecimal(blob.mass, '0'),
-    totalMassEver: asDecimal(blob.totalMassEver, '0'),
+    totalMassEver,
     playTime: Math.max(0, asFiniteNumber(blob.playTime, 0)),
     pulseReadyAt: Math.max(0, asFiniteNumber(blob.pulseReadyAt, 0)),
+    // A save written before stages existed should not announce a backlog of them on load.
+    stageSeen: Math.max(0, Math.floor(asFiniteNumber(blob.stageSeen, stageIndexFor(totalMassEver)))),
     lastSeen: asFiniteNumber(blob.lastSeen, now),
     settings: {
       notation:

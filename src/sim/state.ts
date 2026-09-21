@@ -27,6 +27,8 @@ export interface GameState {
   playTime: number;
   /** `playTime` at which Gravity Pulse becomes available again. */
   pulseReadyAt: number;
+  /** Highest stage the player has been told about, so each one announces itself once. */
+  stageSeen: number;
   /** Wall-clock ms at the last save. The one bridge to real time, used for offline catch-up. */
   lastSeen: number;
   settings: Settings;
@@ -46,6 +48,7 @@ export function initialState(now = Date.now()): GameState {
     levels,
     playTime: 0,
     pulseReadyAt: 0,
+    stageSeen: 0,
     lastSeen: now,
     settings: {
       notation: 'letters',

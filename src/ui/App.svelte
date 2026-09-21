@@ -3,6 +3,7 @@
   import { game } from '../game.svelte';
   import UpgradeCard from './UpgradeCard.svelte';
   import Breakdown from './Breakdown.svelte';
+  import Stages from './Stages.svelte';
   import Settings from './Settings.svelte';
   import AwayDialog from './AwayDialog.svelte';
 
@@ -51,6 +52,14 @@
       <p class="hint">Click the field or press space</p>
     </div>
 
+    {#if view.announceTitle}
+      <div class="announce" role="status">
+        <p class="eyebrow">You are now</p>
+        <p class="title">{view.announceTitle}</p>
+        <p class="body">{view.announceBody}</p>
+      </div>
+    {/if}
+
     {#if view.message}
       <p class="message" role="status">{view.message}</p>
     {/if}
@@ -59,10 +68,26 @@
   <aside>
     <header>
       <h1>Idle Space Particle Game</h1>
-      <div class="progress" title="Progress towards ignition at 1e12 mass">
-        <div class="bar" style="width: {(view.progress * 100).toFixed(2)}%"></div>
+
+      <p class="stage">
+        <span class="stage-name">{view.stageName}</span>
+        <span class="stage-analogue">≈ {view.stageAnalogue}</span>
+      </p>
+
+      <div
+        class="progress"
+        title={view.nextStageName ? `Towards ${view.nextStageName}` : 'Top of the accretion ladder'}
+      >
+        <div class="bar" style="width: {(view.stageFraction * 100).toFixed(2)}%"></div>
       </div>
-      <p class="goal">Ignition at 1e12 mass</p>
+
+      <p class="goal">
+        {#if view.nextStageName}
+          next: {view.nextStageName} at {view.nextStageThreshold}
+        {:else}
+          As heavy as accretion alone can make you
+        {/if}
+      </p>
     </header>
 
     <div class="upgrades">
@@ -72,6 +97,8 @@
     </div>
 
     <Breakdown {view} />
+
+    <Stages {view} />
 
     <Settings
       {view}
@@ -186,6 +213,60 @@
     color: var(--dimmer);
   }
 
+  .announce {
+    position: absolute;
+    top: 7.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(22rem, 80%);
+    text-align: center;
+    padding: 0.75rem 1rem 0.85rem;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: rgba(8, 12, 24, 0.82);
+    backdrop-filter: blur(6px);
+    animation: rise 420ms ease-out;
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translate(-50%, 0.5rem);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .announce {
+      animation: none;
+    }
+  }
+
+  .announce .eyebrow {
+    margin: 0;
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dimmer);
+  }
+
+  .announce .title {
+    margin: 0.15rem 0 0.35rem;
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--warm);
+  }
+
+  .announce .body {
+    margin: 0;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--dim);
+  }
+
   .message {
     position: absolute;
     top: 50%;
@@ -214,17 +295,46 @@
     backdrop-filter: blur(10px);
   }
 
+  /* The stage is the thing you check most; it should not scroll away. */
   aside header {
-    margin-bottom: 0.2rem;
+    position: sticky;
+    top: -1rem;
+    z-index: 1;
+    margin: -1rem -0.9rem 0.2rem;
+    padding: 1rem 0.9rem 0.6rem;
+    background: rgba(11, 16, 32, 0.97);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 10px 14px -12px rgba(0, 0, 0, 0.8);
   }
 
   h1 {
-    margin: 0 0 0.55rem;
+    margin: 0 0 0.5rem;
     font-size: 0.82rem;
     font-weight: 600;
     letter-spacing: 0.09em;
     text-transform: uppercase;
     color: var(--dim);
+  }
+
+  .stage {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin: 0 0 0.45rem;
+  }
+
+  .stage-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--warm);
+  }
+
+  .stage-analogue {
+    font-size: 0.68rem;
+    color: var(--dimmer);
+    text-align: right;
   }
 
   .progress {

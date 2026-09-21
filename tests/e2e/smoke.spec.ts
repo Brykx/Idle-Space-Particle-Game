@@ -1,5 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
 
+/** Drop a save straight into storage, so a test can start anywhere on the ladder. */
+async function seedSave(page: Page, fields: Record<string, unknown>): Promise<void> {
+  await page.addInitScript((seed) => {
+    localStorage.setItem(
+      'idle-space-particle-game',
+      JSON.stringify({ version: 1, lastSeen: Date.now(), ...seed }),
+    );
+  }, fields);
+}
+
 /** The readout is formatted ("3.60 K"), so tests cannot just call `Number()` on it. */
 const SUFFIXES: Record<string, number> = { K: 1e3, M: 1e6, B: 1e9, T: 1e12 };
 
@@ -117,5 +127,38 @@ test.describe('the game runs', () => {
 
     // An hour at ~1 mass/s should dwarf whatever the first few seconds earned.
     expect(await readMass(page)).toBeGreaterThan(massBefore + 3000);
+  });
+
+  test('shows where you are on the ladder, and what a collapse is for', async ({ page }) => {
+    await seedSave(page, { mass: '1e9', totalMassEver: '1e9' });
+    await page.reload();
+
+    await expect(page.locator('.stage-name')).toHaveText('Planet');
+    await expect(page.locator('.stage-analogue')).toContainText('Earth');
+    await expect(page.locator('.goal')).toContainText('Gas Giant');
+
+    await page.locator('.stages summary').click();
+    const rows = page.locator('.stages li');
+    await expect(rows).toHaveCount(14);
+
+    // Everything up to Planet is behind you; the collapse stages never count as reached,
+    // however heavy you get, because accretion cannot take you there.
+    await expect(page.locator('.stages li.reached')).toHaveCount(7);
+    await expect(page.locator('.stages li.current .name')).toHaveText('Planet');
+    await expect(page.locator('.stages li.collapse')).toHaveCount(2);
+    await expect(page.locator('.stages li.collapse.reached')).toHaveCount(0);
+  });
+
+  test('announces a promotion once you cross a threshold', async ({ page }) => {
+    // Just short of Pebble, at an opening income of about 1 mass/s.
+    await seedSave(page, { mass: '90', totalMassEver: '90' });
+    await page.reload();
+
+    await expect(page.locator('.stage-name')).toHaveText('Dust');
+
+    const banner = page.locator('.announce');
+    await expect(banner).toBeVisible({ timeout: 20_000 });
+    await expect(banner.locator('.title')).toHaveText('Pebble');
+    await expect(page.locator('.stage-name')).toHaveText('Pebble');
   });
 });

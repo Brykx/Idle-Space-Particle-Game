@@ -10,6 +10,7 @@ import {
 import { initialState, type GameState } from './sim/state';
 import { UPGRADE_LIST, maxAffordable, type UpgradeId } from './sim/upgrades';
 import { applyOffline, type AwayReport } from './sim/offline';
+import { STAGES, stageAt, stageIndexFor, stageProgress } from './sim/stages';
 import { deserialize, exportSave as exportSaveString, importSave, serialize } from './sim/save';
 import { clearSave, readSave, writeSave } from './storage';
 import { createField, type FieldHandle } from './render/Field';
@@ -31,11 +32,10 @@ const TICK = 1 / 20;
 const UI_INTERVAL = 1 / 12;
 const FIELD_INTERVAL = 1 / 4;
 const AUTOSAVE_INTERVAL = 10;
+/** How long a stage announcement stays on screen. */
+const ANNOUNCE_SECONDS = 7;
 /** A gap larger than this is treated as an absence and credited through the offline path. */
 const OFFLINE_THRESHOLD = 2;
-
-/** 1e12 is ignition — the end of this slice, and what "progress" is measured against. */
-const IGNITION_LOG10 = 12;
 
 export interface UpgradeView {
   id: UpgradeId;
@@ -52,10 +52,32 @@ export interface UpgradeView {
   eta: string;
 }
 
+export interface StageRowView {
+  id: string;
+  name: string;
+  analogue: string;
+  /** Formatted threshold, or an em dash for the stages a collapse brings. */
+  threshold: string;
+  viaCollapse: boolean;
+  reached: boolean;
+  current: boolean;
+}
+
 export interface View {
   mass: string;
   massPerSecond: string;
-  progress: number;
+
+  stageName: string;
+  stageAnalogue: string;
+  /** 0..1 towards the next stage, measured in orders of magnitude. */
+  stageFraction: number;
+  nextStageName: string;
+  nextStageThreshold: string;
+  stages: StageRowView[];
+
+  /** Set when a stage is reached; clears itself after a few seconds. */
+  announceTitle: string;
+  announceBody: string;
 
   spawnRate: string;
   captureFraction: string;
@@ -79,6 +101,8 @@ export interface View {
   away: AwayReport | null;
   awayGained: string;
   awayDuration: string;
+  /** Set when the absence promoted you, e.g. "Planet". */
+  awayStage: string;
 
   message: string;
   saved: boolean;
@@ -88,7 +112,14 @@ function emptyView(): View {
   return {
     mass: '0',
     massPerSecond: '0',
-    progress: 0,
+    stageName: '',
+    stageAnalogue: '',
+    stageFraction: 0,
+    nextStageName: '',
+    nextStageThreshold: '',
+    stages: [],
+    announceTitle: '',
+    announceBody: '',
     spawnRate: '0',
     captureFraction: '0%',
     massPerParticle: '0',
@@ -106,6 +137,7 @@ function emptyView(): View {
     away: null,
     awayGained: '0',
     awayDuration: '',
+    awayStage: '',
     message: '',
     saved: false,
   };
@@ -124,6 +156,7 @@ function createGame() {
   let fieldTimer = 0;
   let saveTimer = 0;
   let messageTimer = 0;
+  let announceTimer = 0;
 
   // ---------------------------------------------------------------- loading and saving
 
@@ -135,8 +168,9 @@ function createGame() {
     }
     try {
       state = deserialize(raw);
+      const stageBefore = stageIndexFor(state.totalMassEver);
       const report = applyOffline(state);
-      if (report) showAway(report);
+      if (report) showAway(report, stageBefore);
     } catch (error) {
       // A save we cannot read is not a save we should overwrite silently.
       state = initialState();
@@ -150,15 +184,26 @@ function createGame() {
     if (!view.saved) flash('Could not write to local storage — progress is not being saved.');
   }
 
-  function showAway(report: AwayReport): void {
+  function showAway(report: AwayReport, stageBefore: number): void {
     view.away = report;
     view.awayGained = format(report.gained, state.settings.notation);
     view.awayDuration = formatDuration(report.awaySeconds);
+
+    const stageAfter = stageIndexFor(state.totalMassEver);
+    view.awayStage = stageAfter > stageBefore ? stageAt(stageAfter).name : '';
+    // The dialog says it, so the banner does not need to as well.
+    state.stageSeen = Math.max(state.stageSeen, stageAfter);
   }
 
   function flash(message: string): void {
     view.message = message;
     messageTimer = 6;
+  }
+
+  function announce(title: string, body: string): void {
+    view.announceTitle = title;
+    view.announceBody = body;
+    announceTimer = ANNOUNCE_SECONDS;
   }
 
   // ---------------------------------------------------------------- the view
@@ -169,10 +214,32 @@ function createGame() {
 
     view.mass = format(state.mass, notation);
     view.massPerSecond = format(rates.massPerSecond, notation);
-    view.progress = Math.max(
-      0,
-      Math.min(1, state.totalMassEver.lte(1) ? 0 : state.totalMassEver.log10() / IGNITION_LOG10),
-    );
+
+    const progress = stageProgress(state.totalMassEver);
+    view.stageName = progress.stage.name;
+    view.stageAnalogue = progress.stage.analogue;
+    view.stageFraction = progress.fraction;
+    view.nextStageName = progress.next?.name ?? '';
+    view.nextStageThreshold = progress.next?.threshold
+      ? format(progress.next.threshold, notation)
+      : '';
+
+    view.stages = STAGES.map((stage, index) => ({
+      id: stage.id,
+      name: stage.name,
+      analogue: stage.analogue,
+      threshold: stage.threshold ? format(stage.threshold, notation) : '—',
+      viaCollapse: stage.threshold === null,
+      reached: stage.threshold !== null && index <= progress.index,
+      current: index === progress.index,
+    }));
+
+    // Announce a promotion once. If several were crossed at once — a big pulse, a long
+    // absence — only the highest is worth saying.
+    if (progress.index > state.stageSeen) {
+      state.stageSeen = progress.index;
+      announce(progress.stage.name, progress.stage.blurb);
+    }
 
     view.spawnRate = rates.spawnRate.toFixed(1);
     view.captureFraction = `${(rates.captureFraction * 100).toFixed(1)}%`;
@@ -220,12 +287,15 @@ function createGame() {
   function refreshField(): void {
     if (!field) return;
     const rates = deriveRates(state);
+    const { look } = stageAt(stageIndexFor(state.totalMassEver));
     field.setRates({
       // Emission tracks the real spawn rate until it outgrows the screen, then grows
       // logarithmically so the field keeps thickening without ever flooding.
       spawnRate: rates.spawnRate <= 60 ? rates.spawnRate : 60 + Math.log10(rates.spawnRate / 60) * 80,
       captureFraction: rates.captureFraction,
-      progress: view.progress,
+      coreScale: look.scale,
+      coreColour: look.core,
+      particleColour: look.particle,
       budget: state.settings.particleBudget,
       reducedMotion: state.settings.reducedMotion,
     });
@@ -277,6 +347,14 @@ function createGame() {
     if (messageTimer > 0) {
       messageTimer -= dt;
       if (messageTimer <= 0) view.message = '';
+    }
+
+    if (announceTimer > 0) {
+      announceTimer -= dt;
+      if (announceTimer <= 0) {
+        view.announceTitle = '';
+        view.announceBody = '';
+      }
     }
 
     if (running) frameHandle = requestAnimationFrame(step);

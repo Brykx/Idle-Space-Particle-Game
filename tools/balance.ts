@@ -1,7 +1,8 @@
-import { D, format, formatDuration, type Num } from '../src/sim/numbers';
+import { format, formatDuration } from '../src/sim/numbers';
 import { buy, deriveRates, nextCost, pulse, pulseReady, tick, unlockedUpgrades } from '../src/sim/economy';
 import { initialState, type GameState } from '../src/sim/state';
 import type { UpgradeId } from '../src/sim/upgrades';
+import { ACCRETION_STAGES } from '../src/sim/stages';
 
 /**
  * Headless pacing sim.
@@ -12,14 +13,15 @@ import type { UpgradeId } from '../src/sim/upgrades';
  * hour fails CI instead of shipping.
  */
 
-export const MILESTONES: Array<{ label: string; at: Num }> = [
-  { label: '1e3  mass', at: D('1e3') },
-  { label: '1e6  mass', at: D('1e6') },
-  { label: '1e9  mass', at: D('1e9') },
-  { label: '1e12 mass  (ignition)', at: D('1e12') },
-];
+/**
+ * The stage ladder is the milestone list — one source of truth, so a threshold moved in
+ * `sim/stages.ts` shows up here without anything else changing. Dust is skipped: it is where
+ * you start.
+ */
+const MILESTONES = ACCRETION_STAGES.slice(1);
 
 export interface PacingResult {
+  id: string;
   label: string;
   seconds: number;
   levels: Record<string, number>;
@@ -43,10 +45,17 @@ export interface Feel {
   worstGap: number;
 }
 
+/** log10(total mass) sampled on a fixed cadence — the shape of the curve, in one line. */
+export interface ShapeSample {
+  minutes: number;
+  log10: number;
+}
+
 export interface PacingRun {
   milestones: PacingResult[];
   /** The first hour, where a new player decides whether to stay. */
   firstHour: Feel;
+  shape: ShapeSample[];
 }
 
 export interface PacingOptions {
@@ -112,6 +121,8 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
   let next = 0;
 
   const decisionTimes: number[] = [];
+  const shape: ShapeSample[] = [];
+  let shapeAt = 0;
   const gains: number[] = [];
   /** (playTime, log2 of income) samples, for the doubling-time estimate. */
   const incomeLog: Array<[number, number]> = [];
@@ -128,6 +139,14 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
       gains.push(after.div(incomeBefore).toNumber() - 1);
     }
 
+    if (s.playTime >= shapeAt) {
+      shape.push({
+        minutes: s.playTime / 60,
+        log10: s.totalMassEver.lte(1) ? 0 : s.totalMassEver.log10(),
+      });
+      shapeAt = s.playTime + 300;
+    }
+
     if (s.playTime >= sampleAt) {
       const mps = deriveRates(s).massPerSecond;
       if (mps.gt(0)) incomeLog.push([s.playTime, mps.log10() / Math.log10(2)]);
@@ -135,8 +154,13 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
     }
 
     const milestone = MILESTONES[next];
-    if (milestone && s.totalMassEver.gte(milestone.at)) {
-      results.push({ label: milestone.label, seconds: s.playTime, levels: { ...s.levels } });
+    if (milestone?.threshold && s.totalMassEver.gte(milestone.threshold)) {
+      results.push({
+        id: milestone.id,
+        label: milestone.name,
+        seconds: s.playTime,
+        levels: { ...s.levels },
+      });
       next += 1;
     }
   }
@@ -144,10 +168,12 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
   // Anything not reached inside the limit is reported as such rather than silently omitted.
   for (; next < MILESTONES.length; next++) {
     const milestone = MILESTONES[next];
-    if (milestone) results.push({ label: milestone.label, seconds: Infinity, levels: { ...s.levels } });
+    if (milestone) {
+      results.push({ id: milestone.id, label: milestone.name, seconds: Infinity, levels: { ...s.levels } });
+    }
   }
 
-  return { milestones: results, firstHour: feel(decisionTimes, gains, incomeLog, 3600) };
+  return { milestones: results, firstHour: feel(decisionTimes, gains, incomeLog, 3600), shape };
 }
 
 function median(values: number[]): number {
@@ -171,20 +197,20 @@ function feel(
     previous = t;
   }
 
-  // Seconds per doubling, between consecutive samples where income actually moved.
-  const doublings: number[] = [];
+  // Seconds per doubling across the whole window.
+  //
+  // Not a median of per-interval rates: income only moves when something is bought, so most
+  // intervals gain nothing and the ones that gain a sliver report an enormous seconds-per-
+  // doubling. The median of that measures the sampling cadence, not the game.
   const samples = incomeLog.filter(([t]) => t <= windowSeconds);
-  for (let i = 1; i < samples.length; i++) {
-    const a = samples[i - 1];
-    const b = samples[i];
-    if (!a || !b) continue;
-    const grew = b[1] - a[1];
-    if (grew > 1e-9) doublings.push((b[0] - a[0]) / grew);
-  }
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  const doublingTime =
+    first && last && last[1] > first[1] ? (last[0] - first[0]) / (last[1] - first[1]) : Infinity;
 
   return {
     purchases: within.length,
-    doublingTime: median(doublings),
+    doublingTime,
     gainPerPurchase: median(gains.slice(0, within.length)),
     worstGap: gaps.length ? Math.max(...gaps) : Infinity,
   };
@@ -194,13 +220,20 @@ function main(): void {
   const run = runPacing();
   const s = initialState(0);
 
-  console.log('\n  time to milestone (payback-optimal play, pulse on cooldown)\n');
+  console.log('\n  time to stage (payback-optimal play, pulse on cooldown)\n');
   for (const r of run.milestones) {
-    const levels = Object.entries(r.levels)
-      .map(([id, n]) => `${id} ${n}`)
-      .join('  ');
-    console.log(`  ${r.label.padEnd(22)} ${formatDuration(r.seconds).padStart(9)}    ${levels}`);
+    const threshold = ACCRETION_STAGES.find((s) => s.id === r.id)?.threshold;
+    const at = threshold ? format(threshold, 'scientific').padStart(10) : '';
+    console.log(`  ${r.label.padEnd(14)} ${at}  ${formatDuration(r.seconds).padStart(9)}`);
   }
+
+  console.log('\n  curve shape — log10(mass) every 5 minutes\n');
+  console.log(
+    '  ' +
+      run.shape
+        .map((s) => `${s.minutes.toFixed(0)}m:${s.log10.toFixed(1)}`)
+        .join('  '),
+  );
 
   const { purchases, doublingTime, gainPerPurchase, worstGap } = run.firstHour;
   console.log(

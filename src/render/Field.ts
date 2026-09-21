@@ -22,8 +22,12 @@ export interface FieldRates {
   spawnRate: number;
   /** 0..1. Decides the ratio of catches to near-misses on screen. */
   captureFraction: number;
-  /** 0..1 overall progress, used for core size and palette drift. */
-  progress: number;
+  /** 0..1, how large to draw the core. Comes from the current stage. */
+  coreScale: number;
+  /** Packed RGB for the core, from the current stage. */
+  coreColour: number;
+  /** Packed RGB for the particles falling in, from the current stage. */
+  particleColour: number;
   /** Maximum live particles. */
   budget: number;
   reducedMotion: boolean;
@@ -69,6 +73,28 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+interface Rgb {
+  r: number;
+  g: number;
+  b: number;
+}
+
+function unpack(colour: number): Rgb {
+  return { r: (colour >> 16) & 0xff, g: (colour >> 8) & 0xff, b: colour & 0xff };
+}
+
+function pack(c: Rgb): number {
+  return (Math.round(c.r) << 16) | (Math.round(c.g) << 8) | Math.round(c.b);
+}
+
+/** Ease a live colour towards a target, in place. */
+function easeColour(current: Rgb, target: number, k: number): void {
+  const to = unpack(target);
+  current.r += (to.r - current.r) * k;
+  current.g += (to.g - current.g) * k;
+  current.b += (to.b - current.b) * k;
+}
+
 /** Blend two packed RGB colours. Used to warm the palette as the core grows. */
 function mixColour(a: number, b: number, t: number): number {
   const ar = (a >> 16) & 0xff;
@@ -82,8 +108,15 @@ function mixColour(a: number, b: number, t: number): number {
   );
 }
 
-const COLD = 0x9fc6ff;
-const WARM = 0xffd9a0;
+/** What the field looks like before the first `setRates` arrives — the dust stage. */
+const INITIAL_CORE = 0x8892a6;
+const INITIAL_PARTICLE = 0x9fc6ff;
+
+/**
+ * How fast the core morphs when the stage changes, in e-folds per second. Slow enough that
+ * becoming a planet is something you watch happen rather than a palette swap.
+ */
+const MORPH_RATE = 1.2;
 
 export interface FieldOptions {
   /** Called when the player clicks the field. */
@@ -122,7 +155,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   const halo = new Sprite(glow);
   halo.anchor.set(0.5);
   halo.blendMode = 'add';
-  halo.tint = COLD;
+  halo.tint = INITIAL_PARTICLE;
 
   const core = new Sprite(glow);
   core.anchor.set(0.5);
@@ -138,9 +171,18 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   let rates: FieldRates = {
     spawnRate: 4,
     captureFraction: 0.25,
-    progress: 0,
+    coreScale: 0.02,
+    coreColour: INITIAL_CORE,
+    particleColour: INITIAL_PARTICLE,
     budget: 1200,
     reducedMotion: false,
+  };
+
+  // What is actually drawn, chasing `rates`. Kept separate so a stage change is a morph.
+  const shown = {
+    scale: rates.coreScale,
+    core: unpack(INITIAL_CORE),
+    particle: unpack(INITIAL_PARTICLE),
   };
 
   const geo: FieldGeometry = { centreX: 0, centreY: 0, spawnRadius: 400, coreRadius: CORE_MIN_RADIUS };
@@ -225,12 +267,20 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   function frame(dt: number): void {
     time += dt;
 
-    const colour = mixColour(COLD, WARM, rates.progress);
+    // Ease everything the stage controls, rather than snapping to it.
+    const k = 1 - Math.exp(-MORPH_RATE * dt);
+    shown.scale += (rates.coreScale - shown.scale) * k;
+    easeColour(shown.core, rates.coreColour, k);
+    easeColour(shown.particle, rates.particleColour, k);
+
+    const particleTint = pack(shown.particle);
+    const coreTint = pack(shown.core);
+
     const emission =
       Math.min(MAX_VISUAL_SPAWN, Math.max(MIN_VISUAL_SPAWN, rates.spawnRate)) *
       (rates.reducedMotion ? 0.4 : 1);
 
-    geo.coreRadius = lerp(CORE_MIN_RADIUS, CORE_MAX_RADIUS, rates.progress);
+    geo.coreRadius = lerp(CORE_MIN_RADIUS, CORE_MAX_RADIUS, shown.scale);
 
     pool.emit(dt, emission, geo, tuning, rates.captureFraction);
     pool.update(dt, geo, tuning, pulseStrength);
@@ -255,19 +305,19 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       const s = (pool.size[i] as number) * 0.13;
       sprite.scaleX = s;
       sprite.scaleY = s;
-      sprite.tint = colour;
+      sprite.tint = particleTint;
     }
 
     // Core: sized by progress, brightened by what it just ate, with a slow idle breath.
     const breath = rates.reducedMotion ? 0 : Math.sin(time * 1.1) * 0.025;
     const coreScale = (geo.coreRadius / 64) * (1 + breath + flash * 0.18);
     core.scale.set(coreScale);
-    core.tint = mixColour(0xfff4de, 0xffffff, flash);
+    core.tint = mixColour(coreTint, 0xffffff, 0.25 + flash * 0.45);
     core.alpha = 0.85 + flash * 0.15;
 
     halo.scale.set(coreScale * 3.4);
-    halo.alpha = 0.16 + flash * 0.20 + rates.progress * 0.12;
-    halo.tint = colour;
+    halo.alpha = 0.16 + flash * 0.2 + shown.scale * 0.12;
+    halo.tint = particleTint;
 
     for (const ring of rings) {
       if (ring.life <= 0) continue;
@@ -306,7 +356,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       const ring = rings.find((r) => r.life <= 0);
       if (!ring) return;
       ring.gfx.clear();
-      ring.gfx.circle(0, 0, 90).stroke({ width: 3, color: 0xbfe0ff, alpha: 1 });
+      ring.gfx.circle(0, 0, 90).stroke({ width: 3, color: pack(shown.particle), alpha: 1 });
       ring.gfx.position.set(geo.centreX, geo.centreY);
       ring.gfx.visible = true;
       ring.life = 1;

@@ -28,6 +28,10 @@
     <p class="gained num">+{view.awayGained}</p>
     <p class="unit">mass accreted</p>
 
+    {#if view.awayStage}
+      <p class="promoted">You are now a <strong>{view.awayStage}</strong>.</p>
+    {/if}
+
     {#if view.away.capped}
       <p class="capped">
         Offline accretion is credited for up to 12 hours. The rest of the cloud drifted past.
@@ -80,6 +84,16 @@
     color: var(--dimmer);
     text-transform: uppercase;
     letter-spacing: 0.08em;
+  }
+
+  .promoted {
+    margin: 1.1rem 0 0;
+    font-size: 0.82rem;
+    color: var(--text);
+  }
+
+  .promoted strong {
+    color: var(--warm);
   }
 
   .capped {

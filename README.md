@@ -9,12 +9,19 @@ worth of what you catch.
 
 ## Status
 
-**Phase 1 — playable.** The core loop runs end to end: five upgrades, a live particle field,
-Gravity Pulse, offline progress, versioned saves with an export string. Ignition at 1e12 mass
-lands at roughly 43 minutes of play.
+**Phase 1 complete, Phase 2 started.** The core loop runs end to end: five upgrades, a live
+particle field, Gravity Pulse, offline progress, versioned saves with an export string.
 
-Next: Phase 2 — milestones, achievements, auto-buyers, the Energy resource and the element
-chain.
+On top of that, the **stage ladder**: fourteen stages from dust to black hole, each changing
+what the core looks like. Dust to Supergiant is accretion — you get there by getting heavier.
+The last two are not, because a star does not grow into a neutron star; it runs out of fuel
+and throws most of itself away. That collapse arrives with the supernova in Phase 3, and the
+ladder shows those two greyed out from the first minute.
+
+A full climb to the top of the visible ladder is about 85 minutes.
+
+Next in Phase 2: achievements, auto-buyers, the accretion disk, the Energy resource and the
+element chain.
 
 ## Running it
 
@@ -42,7 +49,7 @@ and the particle budget are three independent concerns rather than one tangle �
 `src/sim/` imports no DOM, no Pixi and no framework, so it runs in Node and gets real tests.
 
 ```
-src/sim/      pure economy: numbers, upgrades-as-data, rates, offline, saves
+src/sim/      pure economy: numbers, upgrades and stages as data, rates, offline, saves
 src/render/   the particle field; the only place Pixi is imported
 src/ui/       Svelte components, reading a view model refreshed at 12 Hz
 src/game.svelte.ts   the loop: 20 Hz fixed tick, wall-clock reconciliation, autosave

@@ -55,33 +55,40 @@ hard cap the player can bump into.
 Base values: gravity 1, radius 10, spawn 4/s, mass 1 per particle — an opening rate of
 1.00 mass/s against a first upgrade costing 10.
 
-| Upgrade | Base cost | Growth | Effect / level | Unlocks at |
-|---|---|---|---|---|
-| Gravity Well | 10 | 1.25 | gravity ×1.20 | — |
-| Capture Radius | 25 | 1.28 | radius +2.5 | — |
-| Particle Density | 80 | 1.25 | spawnRate +1/s | 50 |
-| Particle Mass | 300 | 1.35 | massPerParticle ×1.25 | 150 |
-| Accretion Efficiency | 2,500 | 2.00 | global ×1.22 | 1,500 |
+| Upgrade | Base cost | Growth | Effect / level | Unlocks at | Ratio |
+|---|---|---|---|---|---|
+| Gravity Well | 10 | 1.425 | gravity ×1.34 | — | 0.41 (saturates) |
+| Capture Radius | 25 | 1.50 | radius +4 | — | additive (saturates) |
+| Particle Density | 30 | 1.685 | spawnRate ×1.165 | 20 | 0.29 |
+| Particle Mass | 100 | 1.826 | massPerParticle ×1.34 | 250 | 0.49 |
+| Accretion Efficiency | 750 | 3.79 | global ×1.34 | 1,200 | 0.22 |
 
-These came out of the balance tool, not out of the air. The ratio that decides everything is
-`ln(effect) / ln(growth)`: below 1 an upgrade returns less than it costs and progress is
-polynomial; at 1 income tracks spending and mass grows exponentially; above 1 it blows up in
-finite time. The first tuning pass had every upgrade under 1 and took over two hours to reach
-1e6. The second summed to ~1.5 across the late-game upgrades and collapsed 1e6 → 1e12 into
-37 seconds. The shipped numbers put the two upgrades that survive to the late game
-(Particle Mass at 0.74, Efficiency at 0.29) just over 1 combined.
+### The ratio that decides everything
 
-Capture and reach saturate, so Gravity Well and Capture Radius are deliberately an opening:
-they carry the first ten minutes and then hand over. Particle Density is additive against an
-exponential cost, which makes it the cheap, frequent, always-something-to-buy upgrade rather
-than an engine.
+`ln(effect) / ln(growth)` is how much income an upgrade returns per order of magnitude spent.
+Below 1 it returns less than it costs and progress is polynomial. **At exactly 1, income
+tracks spending and mass climbs at a constant number of orders of magnitude per minute.**
+Above 1 it blows up in finite time.
 
-`cost(n) = base × growth^n`, so total for n levels is a geometric sum — closed form, which
-"buy max" needs to stay instant at level 400.
+The three upgrades that survive to the late game sum to
+**0.998** — near enough to 1 that the curve is a straight line in log
+space. Gravity Well and Capture Radius sit outside that sum on purpose: both feed a capture
+fraction that saturates towards 1, so they are cheap, strong, and finished within ten minutes.
+They are the opening, not an engine.
 
-Mixed growth rates are deliberate: cheap-and-frequent upgrades keep the early minutes clicky;
-expensive-and-rare ones become the goals you save toward. The design target is a purchase
-every **15-60 seconds** for the first hour.
+Getting here took five passes:
+
+1. Every upgrade below 1 → polynomial. 1e6 took over two hours.
+2. Late-game upgrades summing to ~1.5 → finite-time blowup. 1e6 to 1e12 in 37 seconds.
+3. Density additive against an exponential cost → its returns decayed to nothing, opening a
+   dead zone where minutes 5-25 gained 2.3 orders and the next 15 gained 8. Making density
+   multiplicative closed it.
+4. Sum at 1.00 → dead straight, but 275s per doubling. Too slow.
+5. Base costs cut to raise the rate constant, then effects and growth scaled together to make
+   purchases chunkier without touching pacing. 89s per doubling, +2.1% per purchase.
+
+The rate constant and the shape are separate dials, which is what made the last two passes
+possible: `Π baseCost^ratio` sets how fast, the ratio sum sets whether it stays straight.
 
 ### Active play: Gravity Pulse
 
@@ -91,61 +98,126 @@ it is worth something on the very first click — on a 10 s cooldown. Active pla
 requirement — upgrades later automate it entirely. Idle games that punish you for closing the
 tab don't get reopened.
 
+## The stage ladder
+
+The number is abstract; the thing in the middle of the screen is not. Every threshold on the
+ladder changes what you are, and the core visibly morphs into it.
+
+```
+dust → pebble → boulder → planetesimal → asteroid → protoplanet → planet   accretion,  mass ↑
+planet → gas giant → brown dwarf → red dwarf → star → supergiant           accretes H, mass ↑
+★ supergiant ──SUPERNOVA──> neutron star                                   mass ↓ ~90%: RESET
+neutron star → black hole                                                  past TOV,   mass ↑
+```
+
+Driven by lifetime mass, not current mass, so spending never demotes your core. You built
+those upgrades out of what you caught; the core keeps what it was.
+
+### Why the ladder resets where it does
+
+The physics is mostly honest, and where it isn't, the break is useful.
+
+**Dust through planet is core accretion** — real, and gravity-driven once you pass about a
+kilometre. Below that, grains stick by electrostatic and van der Waals forces rather than by
+gravity, which is why Planetesimal's blurb is the first to mention your own gravity holding
+you together.
+
+**Planet through star works, as long as what you accrete is hydrogen.** A rocky planet does
+not become a star by putting on more rock; stars form top-down from collapsing gas clouds.
+But gas giant → brown dwarf (13 Jupiter masses, deuterium fusion) → red dwarf (~0.08 solar
+masses, hydrogen fusion) is a real, mass-gated sequence. Phase 2's element chain is what
+gates it in the game, which means the correction pays for a system already planned.
+
+**Star to neutron star is the one that runs backwards.** A star does not become a neutron
+star by gaining mass. It runs out of fuel, its core collapses, and it throws roughly ninety
+percent of itself away. A 20-solar-mass star leaves a 1.4-solar-mass remnant.
+
+That is a prestige reset. You lose nearly everything and keep a far denser core plus the
+heavy elements you scattered — and supernovae genuinely are where most heavy elements come
+from, so Stardust stops being a game-ism and becomes the mechanism. The last two stages
+therefore carry no threshold at all: no amount of accretion reaches them.
+
+**Neutron star to black hole is correct and mass-driven.** Past the Tolman-Oppenheimer-
+Volkoff limit (~2.2-2.9 solar masses) nothing holds it up. A pure threshold, no reset.
+
+### Units
+
+Mass is unitless, and each stage carries its real-world analogue as flavour — "≈ Earth",
+"≈ Ceres". Making the currency literal kilograms was tempting, and the thresholds would have
+written themselves, but prestige multipliers blow past any real threshold within two runs, at
+which point literal units become a lie you have to keep maintaining.
+
+### Thresholds
+
+Placed against the measured curve rather than on round numbers, so promotions arrive on a
+rhythm: roughly four minutes apart at the start, stretching to eleven by the top.
+
+| Stage | Threshold | Reached at | Analogue |
+|---|---|---|---|
+| Dust | 0 | start | a grain of interstellar dust |
+| Pebble | 100 | 0:50 | a handful of gravel |
+| Boulder | 2e3 | 4:46 | a boulder |
+| Planetesimal | 4e4 | 11:06 | a 1 km planetesimal |
+| Asteroid | 6e5 | 17:02 | Ceres |
+| Protoplanet | 1.5e7 | 23:57 | the Moon |
+| Planet | 6e8 | 32:08 | Earth |
+| Gas Giant | 4e10 | 41:12 | Jupiter |
+| Brown Dwarf | 4e12 | 51:06 | 13 Jupiter masses |
+| Red Dwarf | 6e14 | 1:02:06 | 0.08 solar masses |
+| Star | 1.2e17 | 1:13:52 | the Sun |
+| Supergiant | 1.5e19 | 1:24:42 | 20 solar masses |
+| Neutron Star | — | supernova | 1.4 solar masses |
+| Black Hole | — | past TOV | beyond 2.3 solar masses |
+
 ## Progression
 
-### Act I — Accretion (0-45 min)
-The five upgrades above. Particles are grey hydrogen. First milestones at 1e3 / 1e6 / 1e9 mass
-unlock, in order: the mass-rate readout, the Accretion Disk, and auto-buy.
+### Act I — Accretion (0-30 min)
+The five upgrades. Particles are grey hydrogen, and the core climbs from dust to protoplanet.
 
-- **Accretion Disk** — an orbiting ring that sweeps particles passively; tiered, and the first
-  upgrade that visibly changes the field's shape.
-- **Auto-buyers** — per upgrade, unlocked individually, each with an on/off toggle and a
-  "keep under X% of income" priority. Automation is a reward, not a chore transfer.
+### Act II — Ignition (30 min - 2 h)
+The core passes Gas Giant and starts keeping the hydrogen it catches.
 
-### Act II — Ignition (45 min - 6 h)
-At **1e12 kg** the core ignites. Fusion begins; a second resource appears.
-
-- **Energy** accumulates from fusion, spends on multipliers mass cannot buy. Two currencies
+- **Energy** accumulates from fusion and spends on multipliers mass cannot buy. Two currencies
   with genuinely different sinks — the standard fix for a single-currency game going flat.
 - **Elements**: hydrogen → helium → carbon → oxygen → iron. Each tier needs a *fusion
-  temperature* upgrade to unlock and multiplies `massPerParticle`. Particle colour in the
-  field shifts with your dominant element, so the screen reports your progress without a
-  number.
+  temperature* upgrade and multiplies `massPerParticle`. Particle colour in the field already
+  tracks your stage, so the screen reports progress without a number.
 - **Magnetic Field** captures charged particles the gravity well misses — a second, parallel
   capture stat so the build has a choice in it.
-- **Iron is a wall.** Fusing iron costs energy instead of producing it. Rate stalls. That's
-  the prestige prompt, and it's the real astrophysics, which is worth something.
+- **Iron is a wall.** Fusing iron costs energy instead of producing it. The rate stalls. That
+  is the prestige prompt, it is the real astrophysics, and it is the brake the curve needs.
 
-### Act III — Supernova (first prestige, ~6 h)
-Collapse the core. Lose all mass, upgrades, energy, elements. Gain **Stardust**:
+### Act III — Supernova (first prestige)
+Collapse the supergiant. Lose the mass, the upgrades, the energy, the elements. Gain
+**Stardust**:
 
 ```
-stardust = floor( 12 × (mass / 1e12) ^ 0.6 )
+stardust = floor( 12 × (mass / threshold) ^ 0.6 )
 ```
 
-Exponent 0.6 means prestiging later earns more total but at falling efficiency, so there is a
-real decision every run instead of one correct answer.
+Exponent 0.6 means prestiging later earns more in total but at falling efficiency, so there is
+a real decision every run instead of one correct answer.
 
 Stardust buys a permanent tree — global multiplier, starting mass, spawn rate, offline
-efficiency, faster auto-buyers, cheaper upgrade scaling. The field becomes a nebula, pre-seeded
-with heavy elements: run 2 reaches Act II in a fraction of the time and *feels* different, not
-just faster.
+efficiency, faster auto-buyers, cheaper upgrade scaling. You restart as a neutron star in a
+nebula seeded with heavy elements: run 2 reaches Act II in a fraction of the time and *feels*
+different, not just faster.
 
-### Act IV — Collapse (second prestige, ~40 h)
-Enough stardust and the core collapses past its Schwarzschild radius. Reset stardust for
+### Act IV — Collapse (second prestige)
+Accrete past the TOV limit and the neutron star becomes a black hole. Reset Stardust for
 **Singularities**, and unlock mechanics rather than numbers:
 
 - **Hawking Radiation** — passive mass while fully offline, the black hole's version of idle.
 - **Relativistic Jets** — periodic burst production, an active layer that isn't clicking.
 - **Time Dilation** — a literal simulation speed multiplier. Rare in the genre, obvious here.
-- **Gravitational Lensing** — a shader that warps the starfield around the core. Pure spectacle
-  and the best screenshot in the game.
+- **Gravitational Lensing** — a shader that warps the starfield around the core. Pure
+  spectacle and the best screenshot in the game.
 
 ### Act V — Galactic (endgame)
-Core becomes a galactic nucleus; particles become stars, then dust lanes, then satellite
-galaxies. Content here is **challenges** — runs under a restriction ("particles repel", "no
-capture radius", "10x costs") that pay permanent multipliers. Cheap to author, high replay,
-and they exercise systems that already exist.
+The black hole becomes a galactic nucleus; particles become stars, then dust lanes, then
+satellite galaxies. Content here is **challenges** — runs under a restriction ("particles
+repel", "no capture radius", "10x costs") that pay permanent multipliers. Cheap to author,
+high replay, and they exercise systems that already exist.
 
 ## Supporting systems
 
@@ -173,21 +245,41 @@ Pacing gets tested, not guessed. A headless sim (`npm run balance`) plays the ga
 greedy buy-cheapest-first policy and prints time-to-milestone:
 
 ```
-  1e3  mass                   4:48    gravity 11  radius 6  density 2
-  1e6  mass                  29:13    gravity 39  radius 31  density 29  particleMass 19
-  1e9  mass                  38:24    gravity 70  radius 59  density 60  particleMass 42
-  1e12 mass  (ignition)      42:56    gravity 101 radius 87  density 92  particleMass 64
+  Pebble                100        50s
+  Boulder           2.000e3       4:46
+  Planetesimal      4.000e4      11:06
+  Asteroid          6.000e5      17:02
+  Protoplanet       1.500e7      23:57
+  Planet            6.000e8      32:08
+  Gas Giant        4.000e10      41:12
+  Brown Dwarf      4.000e12      51:06
+  Red Dwarf        6.000e14    1:02:06
+  Star             1.200e17    1:13:52
+  Supergiant       1.500e19    1:24:42
 
-  first hour: 369 purchases   income doubles every 111s   (target 45-150s)
-              +1.4% per purchase   (target 1-15%)   longest wait 25s
+  curve shape — log10(mass) every 5 minutes
+  0m:0.7  5m:3.3  10m:4.4  15m:5.4  20m:6.4  25m:7.4  30m:8.4  35m:9.4  40m:10.4
+  45m:11.4  50m:12.4  55m:13.4  60m:14.4  65m:15.4  70m:16.3  75m:17.3  80m:18.3
+
+  first hour: 265 purchases   income doubles every 89s   (target 45-150s)
+              +2.1% per purchase   (target 1-15%)   longest wait 20s
 ```
 
-Counting purchases turned out to measure the bot's policy rather than the design — an agent
+The stage ladder *is* the milestone list, so a threshold moved in `sim/stages.ts` shows up
+here without anything else changing.
+
+Two metrics were wrong before they were right. Counting purchases turned outCounting purchases turned out to measure the bot's policy rather than the design — an agent
 that buys the moment it can afford anything always buys one level at a time, whatever the
-curve. Income doubling time and gain per purchase describe how the game *feels*, so those are
-what get asserted.
+curve. And doubling time was first computed as a median of per-interval rates, which measured
+the sampling cadence rather than the game: income only moves when something is bought, so
+most intervals gain nothing and the ones that gain a sliver report an enormous seconds-per-
+doubling. It is now measured across the whole window.
+
+The assertion that matters most compares the slope of the curve early against the slope late.
+A ratio outside 0.6-1.8 means the exponent sum has drifted off 1, which is the single change
+that can quietly ruin the whole game.
 
 The bounds in `tests/balance.test.ts` are generous on purpose. They are not claiming the
-tuning is good; they catch a change that quietly doubles the first hour or collapses the last
-three orders of magnitude into nothing. Both are easy to do by accident and invisible in a
-five-minute play test.
+tuning is good; they catch a change that doubles the first hour, opens a wall in the middle,
+or collapses the late game into nothing. All three are easy to do by accident and invisible
+in a five-minute play test.

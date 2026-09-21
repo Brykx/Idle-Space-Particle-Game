@@ -50,11 +50,11 @@ export interface Rates {
 
 /** Pure: state in, every derived number out. Used by the UI, the renderer and the tests alike. */
 export function deriveRates(s: GameState): Rates {
-  const gravity = BASE_GRAVITY * Math.pow(1.2, s.levels.gravity);
-  const radius = BASE_RADIUS + 2.5 * s.levels.radius;
-  const spawnRate = BASE_SPAWN + 1 * s.levels.density;
-  const massPerParticle = D(1.25).pow(s.levels.particleMass);
-  const globalMultiplier = Math.pow(1.22, s.levels.efficiency);
+  const gravity = BASE_GRAVITY * Math.pow(1.34, s.levels.gravity);
+  const radius = BASE_RADIUS + 4 * s.levels.radius;
+  const spawnRate = BASE_SPAWN * Math.pow(1.165, s.levels.density);
+  const massPerParticle = D(1.34).pow(s.levels.particleMass);
+  const globalMultiplier = Math.pow(1.34, s.levels.efficiency);
 
   const reach = radius * Math.sqrt(gravity);
   // Guard the far end: once gravity overflows a float the fraction is 1 for all purposes.
