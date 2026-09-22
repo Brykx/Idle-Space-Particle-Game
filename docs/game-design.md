@@ -166,18 +166,42 @@ giant wants bands, a planet a lit limb and a terminator, a star a corona, a neut
 hard bright point far smaller than the stage before it, a black hole a dark disc with a
 bright ring. This is the single biggest visual gap in the game.
 
-**Particle size.** Fixed at a random 0.55–1.3 for the whole run. Dust should be a fine haze
-of motes barely a pixel across; a supergiant should be hauling in visibly chunky bodies. The
-size range belongs on the stage.
+**Particle size and count, traded against each other.** This is the one that carries the
+ladder, and it is a single rule rather than two settings:
 
-**Orbit character.** Captured particles spawn at 0.12–0.46 × orbital speed with a fixed drag
-of 0.3/s, at every stage, so they spiral in over a couple of seconds from dust to supergiant.
-That is backwards. Early on your gravity is feeble and particles should *loiter* — several
-slow, wide orbits before the drag finally wins. Late on the well is deep and they should fall
-hard and fast. Both the tangential range and the drag coefficient belong on the stage.
+> As the core climbs, particles get **bigger** and **fewer**.
 
-**Field density.** Emission is driven by the economy alone. A stage could also widen or narrow
-the band the particles arrive in, so the cloud visibly tightens as the core grows.
+Dust is a haze of hundreds of specks that barely fall — your gravity is feeble, and what you
+catch is catching *itself* as much as you. By Planet it should be sparse traffic of
+individually visible meteors, each one an event. By Supergiant you are swallowing whole
+moons: a handful of large bodies on screen at a time, each arriving with weight.
+
+Indicative shape across the twelve accretion stages:
+
+| Stage | Size | Count | Reads as |
+|---|---|---|---|
+| Dust | ×0.3 | ×4 | a haze, barely moving inward |
+| Planetesimal | ×0.7 | ×2 | gravel, starting to fall |
+| Asteroid | ×0.9 | ×1.5 | rocks on visible arcs |
+| Planet | ×1.6 | ×0.8 | meteors, each one an event |
+| Brown Dwarf | ×2.5 | ×0.45 | large bodies, sparse |
+| Supergiant | ×4.2 | ×0.22 | moons, one or two at a time |
+
+**Count falls roughly as the inverse square of size**, so the total lit area stays in a narrow
+band. That matters because the field blends additively: hold area roughly constant and the
+screen stays evenly bright while its *character* changes completely. Let the area climb freely
+and the late game is a white blowout; hold it exactly constant and the late game feels no
+weightier than the early. A gentle rise — perhaps two-fold across the whole ladder — is right.
+
+Keep a per-particle size spread at every stage and just move its centre, so each stage has
+variety and the transitions read as gradual rather than as a costume change.
+
+None of this touches the economy. Income is what it was; what changes is what income *looks
+like*. The particle budget slider still caps the whole thing, and at the top of the ladder it
+will barely be reached.
+
+**Field density.** A stage can also widen or narrow the band the particles arrive in, so the
+cloud visibly tightens as the core grows.
 
 The first needs shader work. The other three are extra fields on `StageLook` threaded through
 `FieldRates` — cheap, and they would make the early game read very differently from the late.
@@ -309,6 +333,83 @@ The black hole becomes a galactic nucleus; particles become stars, then dust lan
 satellite galaxies. Content here is **challenges** — runs under a restriction ("particles
 repel", "no capture radius", "10x costs") that pay permanent multipliers. Cheap to author,
 high replay, and they exercise systems that already exist.
+
+## Beyond the black hole — the second half of the game
+
+*Vision, not a plan. Nothing below should start before Phase 5 ships and people have actually
+played the first half.*
+
+### Why the game needs a third act at all
+
+Acts I to V are one verb: **accretion**. You pull things in, and the reward for pulling well
+is being able to pull harder. The arc ends at a black hole because that is where gravity ends
+— there is nothing further down that road. Adding a fourth prestige that grants more
+multipliers would be the same game with bigger numbers.
+
+The way out is to change the verb. Not "pull harder" but **propagate**: stop being a thing in
+the universe and become the thing a universe comes from.
+
+### The Bounce
+
+The last collapse does not deepen. The core's interior reaches a density where it stops being
+a hole and starts being a beginning: a **Big Bang**, and a new universe on the other side.
+
+This is not invented for the game. Black-hole cosmology — the idea that the interior of a
+black hole buds a new spacetime, and Smolin's cosmological natural selection built on top of
+it — is a real, if speculative, line of thought. It is the one place in this game where the
+physics is a live hypothesis rather than settled, and the game should say so rather than
+pretend otherwise.
+
+**What the Bounce grants is different in kind from Stardust and Singularities.** Those were
+currencies you spent on multipliers. The Bounce grants **Constants**: you tune the physics of
+the universe you are about to create. Stronger gravity means faster accretion but shorter-lived
+stars. A denser early universe means more seeds but a hotter, more hostile start. That is a
+build, not a number — and it is cosmological natural selection as a game mechanic, which is
+exactly what the idea is for.
+
+### Life
+
+In the new universe you seed, a planet does something the last one never did: it stays wet
+long enough. **Life starts at the Planet stage** — the first ladder rung that could ever have
+hosted it — and the second half of the game runs on a ladder that mirrors the first, pointing
+outward instead of inward.
+
+```
+inward, gravity   dust ────────────────────────────> black hole
+                                    ↓ Bounce
+outward, life     tide pool ──────────────────────> Type III civilisation
+```
+
+The natural spine for the outward ladder already exists and is real: the **Kardashev scale**.
+
+| Rung | What you are | What you harvest |
+|---|---|---|
+| Abiogenesis | chemistry that copies itself | gradients |
+| Multicellular | bodies | sunlight |
+| Intelligence | a species that models the world | fire, agriculture |
+| Type I | a planetary civilisation | a planet's energy budget |
+| Type II | a Dyson swarm | a whole star's output |
+| Type III | a galactic civilisation | a galaxy's stars |
+
+Mass stops being the currency somewhere around Type I — you cannot weigh a civilisation
+usefully — and **energy captured** takes over, which is what Kardashev actually measures and
+what the disk already taught the player to think about.
+
+### What this reuses
+
+The particle field does not need replacing, it needs **inverting**. The same pool, the same
+trails, the same budget — but particles are no longer things falling *in* to be eaten. They
+are stars you reach, and they **light up and stay** rather than being absorbed. The core stops
+being a sink and becomes an origin. One renderer, two meanings, and the transition from one
+to the other is the single best visual moment the game could have.
+
+### The honest caveat
+
+This is a second game bolted to the first. It is larger than Acts I to V put together: a new
+economy, a new ladder, a new verb, and a UI that has to hold both. It earns its place only if
+the first half is finished and people want more of it. Written down now so the first half can
+be built without closing the door on it — the stage ladder as data, the renderer behind an
+interface, and the economy with no DOM in it are all already the right shape for this.
 
 ## Supporting systems
 

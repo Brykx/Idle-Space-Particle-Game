@@ -156,12 +156,13 @@ different doing it.
 
 ### Phase 4 — Visual pass (~2-3 days)
 
-- **Field identity per stage** — `StageLook` should also carry particle size, orbit character
-  (tangential range and drag) and field width. Today particles are the same size and spiral
-  in the same way from Dust to Supergiant; early stages should have a fine haze that loiters
-  in wide slow orbits, late ones chunky bodies that fall hard. These are extra fields threaded
-  through `FieldRates` rather than shader work, so they can land at any point — pull them
-  forward if visible progress matters more than prestige.
+- **Field identity per stage** — `StageLook` gains particle size, particle count, orbit
+  character (tangential range and drag) and field width. The rule that carries the ladder:
+  particles get bigger and fewer as the core climbs, with count falling roughly as the inverse
+  square of size so the lit area stays in a narrow band. Dust is a haze of specks that barely
+  fall; Planet is sparse traffic of individually visible meteors; Supergiant swallows moons.
+  Extra fields threaded through `FieldRates` rather than shader work, so this can land at any
+  point — pull it forward if visible progress matters more than prestige.
 - **Core surface detail** — the stage ladder gives this a concrete brief: fourteen distinct
   appearances, of which the current build has fourteen colour-and-size variations and nothing
   else. Bands for the gas giant, a lit limb for the planet, a corona for the star, a hard
@@ -181,6 +182,19 @@ framework, endgame content.
 Balance pass driven by `tools/balance.ts`, mobile layout, PWA, performance profiling on a
 real low-end device, README and screenshots. The Playwright smoke suite landed in Phase 1 and
 has grown with each phase since.
+
+### Phase 7 — The Bounce and the second half (vision only)
+
+A third prestige that ends the inward game and starts an outward one: the core's interior
+becomes a Big Bang, and the universe it seeds grows life at the Planet stage, up a Kardashev
+ladder to a galactic civilisation. The currency it grants is not a multiplier but the physical
+constants of the next universe.
+
+Written up in the design doc. **Not scheduled**, and not to be started before Phase 5 ships
+and people have played the first half — it is larger than Acts I to V put together. It is
+recorded now so the first half is built without closing the door on it, which mostly means
+keeping what is already true: ladders as data, the renderer behind an interface, and an
+economy with no DOM in it.
 
 ## Testing strategy
 
