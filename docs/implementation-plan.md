@@ -16,6 +16,9 @@ src/
     save.ts            # serialize, deserialize, MIGRATIONS[]
   render/
     Field.ts           # the only file that imports pixi; init/setRates/pulse/destroy
+    shading.ts         # the GLSL: a shared impostor preamble + one surface per BodyKind
+    impostor.ts        # Pixi plumbing for the shader bodies
+    textures.ts        # procedural canvas bodies — the fallback when WebGL is unavailable
     pool.ts            # pre-allocated particle pool, zero per-frame allocation
     effects.ts         # pulse, ignition, supernova, lensing
   ui/                  # Svelte components; read snapshots, dispatch intents
@@ -135,26 +138,74 @@ risk table.
 
 Still to do:
 
-- **Energy** — a second resource from fusion, with sinks mass cannot buy
-- **Element chain** — H → He → C → O → Fe, gating the star stages, multiplying mass per particle
-- **Magnetic Field** — catches charged particles gravity misses
-- **The iron wall** — fusing iron costs energy; the rate stalls, and that is the prestige prompt
+- **A promotion should pay, and Density should rebase** — the last new upgrade card appears
+  ~20 minutes in and the ladder runs to ~55, and reaching a stage currently moves income by
+  nothing at all. The design is worked out in the design doc: Density resets and rebases at
+  each stage, and a promotion grants x3 to carry the exponent share Density gives up. The two
+  are one change — shipping either alone either makes promotion a punishment or collapses the
+  cost-exponent sum to 0.71 and walls the late game. Second-tier cards follow after.
+- **Achievements, the remaining ~37.** 23 are in. The set is meant to reach about 60.
+- **The iron wall** — iron is already listed as unreachable, but reaching the end of the
+  chain does not yet *stall* anything. Making it bite belongs with Phase 3, because a wall
+  with no way through it is the worst state to leave a player in.
 
 **Done when:** a 6-hour session has something new every ~20 minutes.
 
 ### Phase 3 — Supernova prestige (~2 days)
 Reset layers, stardust formula, the permanent tree, nebula restart state, the supernova
-sequence itself. Tab navigation arrives here, because now there is enough to need it.
+sequence itself, and the iron wall that prompts it. Tabs already arrived in Phase 2, so the
+navigation for it exists.
 
 **Done when:** run 2 reaches the Brown Dwarf stage in under a third of run 1's time and feels
 different doing it.
 
 ### Phase 4 — Visual pass (~2-3 days)
 
-- **Core surface detail** — the stage ladder gives this a concrete brief: fourteen distinct
-  appearances, of which the current build has fourteen colour-and-size variations and nothing
-  else. Bands for the gas giant, a lit limb for the planet, a corona for the star.
-- Custom shaders for core glow and bloom, camera easing, audio layer.
+- **Field identity per stage — done.** `StageLook` carries particle size, count, orbit range,
+  drag and lifetime; particles get bigger and fewer as the core climbs, with the lit area
+  rising only 2.6x across the ladder. Field *width* is the one part not done.
+- **Core surface detail — done.** `StageLook` carries a `BodyKind`, and
+  `render/textures.ts` draws one procedural canvas per kind at start-up: cratered irregular
+  rocks, mottled worlds with an atmosphere limb, a banded gas giant with a storm, a dim
+  self-lit ember, a hard star, a spiked neutron remnant, and a black hole that is an actual
+  opaque hole with a ring. Solid kinds draw with normal blending so they occlude the field and
+  can be dark on one side; only luminous kinds keep the additive glow.
+- **Sphere impostors — done, all eight kinds.** A canvas body is a *picture* of an object:
+  the lighting is baked in at start-up, so the terminator never moves and the detail is
+  whatever 256px could hold. `render/shading.ts` computes the disc per pixel instead --
+  recovering the sphere normal from the fragment position, then doing the lighting in GLSL,
+  with surface detail sampled in *body* space so it rotates with the object and compresses
+  correctly towards the limb. One quad and one draw call each.
+
+  What each kind is made of:
+
+  | kind | what the shader does |
+  |---|---|
+  | mote | a density field, no surface at all — the only kind with no edge anywhere |
+  | rock | a displaced silhouette (it is not a sphere), craters and grain as a height field, relief from its gradient |
+  | world | ocean, continents, ice at the poles and on high ground, a specular that only water gets, cloud on its own slower rotation, a scattering rim |
+  | gas | anisotropic cloud noise — belts fall out of the sampling — plus a latitude shear, a storm fixed in body space, wrap lighting for a deep atmosphere |
+  | ember | lit from *inside*: no terminator, brightest where you look straight down into it, with silicate weather drifting across the heat |
+  | star | granulation, the real limb-darkening law, starspots in two activity belts, faculae at the limb, a chromosphere, a fanned corona and prominences |
+  | remnant | a hard point with a photon ring, a plasma torus, and two beams on a magnetic axis tilted off the spin axis |
+  | hole | an opaque shadow, a photon ring, a Doppler-beamed disc seen at a shallow angle, and its far side lensed over the top |
+
+  Three things are worth keeping in mind before touching this:
+
+  - **Shade in body space, not view space.** The light has to make the same trip as the
+    normal, or a turning body's own features are lit from a direction that drifts as it
+    rotates. `toBody` returns a matrix rather than applying one for exactly this reason.
+  - **Rotate every fbm octave.** Value noise is built on an axis-aligned lattice, and octaves
+    that share those axes line up: the lattice planes cut the sphere in the same places at
+    every scale. On the star it came out as a bright Y across the disc.
+  - **Exposure is a feature.** A star is bright enough to clip, and the granules, the spots
+    and the limb all live in the top fifth of the range that clipping throws away.
+
+  `textures.ts` stays as the fallback for a renderer that cannot run GLSL, and `bodies.html`
+  (dev only, not in the build) mounts the field on its own so the last two stages — which
+  carry no mass threshold and arrive with the supernova — can be looked at at all.
+- Field **width** per stage, the one part of field identity still open.
+- Bloom, camera easing, audio layer.
 
 The Phase 1 renderer interface means all of this touches `render/` only.
 
@@ -165,20 +216,37 @@ Second prestige, Hawking radiation, jets, time dilation, lensing shader, the cha
 framework, endgame content.
 
 ### Phase 6 — Ship (~2 days)
-Balance pass driven by `tools/balance.ts`, mobile layout, PWA, Playwright smoke test,
-performance profiling on a real low-end device, README and screenshots.
+Balance pass driven by `tools/balance.ts`, mobile layout, PWA, performance profiling on a
+real low-end device, README and screenshots. The Playwright smoke suite landed in Phase 1 and
+has grown with each phase since.
+
+### Phase 7 — The Bounce and the second half (vision only)
+
+A third prestige that ends the inward game and starts an outward one: the core's interior
+becomes a Big Bang, and the universe it seeds grows life at the Planet stage, up a Kardashev
+ladder to a galactic civilisation. The currency it grants is not a multiplier but the physical
+constants of the next universe.
+
+Written up in the design doc. **Not scheduled**, and not to be started before Phase 5 ships
+and people have played the first half — it is larger than Acts I to V put together. It is
+recorded now so the first half is built without closing the door on it, which mostly means
+keeping what is already true: ladders as data, the renderer behind an interface, and an
+economy with no DOM in it.
 
 ## Testing strategy
 
 The economy is pure, so it gets real tests rather than token ones:
 
 - **Determinism** — same seed + same inputs ⇒ byte-identical state after 10k ticks.
-- **Offline equivalence** — 3600 ticks of 1 s and 36 ticks of 100 s land within tolerance.
-  This is the bug that eats a weekend; catch it in Phase 1.
+- **Offline fidelity** — an absence must pay close to what being present pays, measured
+  *relative to what was gained* rather than in absolute orders of magnitude, and the
+  integration must be converged at the step size offline actually uses. Auto-buyers turned
+  this from a formality into the sharpest test in the suite.
 - **Cost curves** — `buyMax` spends exactly the geometric sum, never one credit over.
 - **Save migrations** — a stored fixture per version, each one loading into current state.
-- **Pacing** — `balance.test.ts` asserts time-to-milestone inside generous bounds, so a
-  tuning tweak that doubles the first hour fails CI instead of shipping.
+- **Pacing** — `balance.test.ts` asserts time-to-stage inside generous bounds, and compares
+  the curve's early slope against its late slope, so a tuning tweak that doubles the first
+  hour, opens a wall, or collapses the late game fails CI instead of shipping.
 
 Rendering gets one Playwright smoke test (load, buy, reload, mass persisted) and otherwise
 gets looked at by a human, which is the honest way to test a particle field.
@@ -196,7 +264,8 @@ gets looked at by a human, which is the honest way to test a particle field.
 | Offline quietly pays less than being present | Auto-buyers make income a feedback loop, so the catch-up step size now sets accuracy, not just speed. Steps are capped at half a second while automation is running (60s when it is not, where the rate barely moves), and a test asserts the integration is converged at that step |
 | Scope drift into Acts IV-V | Phases ship independently; the game is releasable from the end of Phase 3 |
 
-## Suggested first commit after approval
+## What is open
 
-Phase 0 and Phase 1 together, so the first thing reviewed is something playable rather than
-a folder of config.
+Phases 2 through 6, in the order above. The game is releasable from the end of Phase 3; the
+three items most worth doing next are the two reported from play — second-tier upgrades so
+the Core tab keeps changing, and per-stage particle character — and then the supernova.

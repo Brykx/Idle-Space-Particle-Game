@@ -8,8 +8,8 @@
   The whole economy, in one line. A player who reads this understands the game; every later
   system will enter by multiplying one of these four terms.
 -->
-<details class="breakdown">
-  <summary>How mass is made</summary>
+<section class="breakdown">
+  <h2>How mass is made</h2>
 
   <ol>
     <li>
@@ -34,7 +34,7 @@
     <span class="label">= mass per second</span>
     <span class="value num strong">{view.massPerSecond}</span>
   </p>
-</details>
+</section>
 
 <style>
   .breakdown {
@@ -44,24 +44,13 @@
     padding: 0.5rem 0.7rem;
   }
 
-  summary {
-    cursor: pointer;
-    font-size: 0.8rem;
-    color: var(--dim);
-    list-style: none;
-  }
-
-  summary::-webkit-details-marker {
-    display: none;
-  }
-
-  summary::before {
-    content: '▸ ';
+  h2 {
+    margin: 0;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
     color: var(--dimmer);
-  }
-
-  details[open] summary::before {
-    content: '▾ ';
   }
 
   ol {

@@ -22,6 +22,12 @@ export interface PoolTuning {
   gravity: number;
   /** Per-second velocity damping applied to particles on a capture trajectory. */
   captureDrag: number;
+  /**
+   * Tangential speed of a capture trajectory as a fraction of the local circular-orbit speed,
+   * sampled between the two. Near 1 it holds an orbit and loiters; near 0 it drops straight in.
+   * Comes from the current stage, which is what makes dust drift and a supergiant swallow.
+   */
+  captureTangential: [number, number];
   /** Seconds before an unabsorbed particle gives up and fades. */
   lifetime: number;
 }
@@ -29,6 +35,7 @@ export interface PoolTuning {
 export const DEFAULT_TUNING: PoolTuning = {
   gravity: 2.6e7,
   captureDrag: 0.3,
+  captureTangential: [0.12, 0.46],
   lifetime: 11,
 };
 
@@ -133,8 +140,9 @@ export class ParticlePool {
     // Captured particles start well under orbital speed and aimed inward, so they visibly
     // fall rather than loitering in a wide orbit off-screen. Flybys start above it and swing
     // past — the near-misses are what make the capture fraction legible.
+    const [tanMin, tanMax] = tuning.captureTangential;
     const tangential = willBeCaptured
-      ? orbital * (0.12 + Math.random() * 0.34)
+      ? orbital * (tanMin + Math.random() * Math.max(0, tanMax - tanMin))
       : orbital * (0.5 + Math.random() * 0.35);
     const radial = willBeCaptured
       ? -orbital * (0.35 + Math.random() * 0.4)

@@ -1,3 +1,4 @@
+import { inflateSync } from 'node:zlib';
 import { expect, test, type Page } from '@playwright/test';
 
 /** Drop a save straight into storage, so a test can start anywhere on the ladder. */
@@ -19,6 +20,96 @@ async function readMass(page: Page): Promise<number> {
   if (!match) throw new Error(`Could not parse mass readout: "${text}"`);
   const [, digits, suffix] = match;
   return Number(digits) * (suffix ? (SUFFIXES[suffix] ?? Number.NaN) : 1);
+}
+
+/**
+ * Just enough PNG to read pixels back: 8-bit, non-interlaced, RGB or RGBA, which is what a
+ * screenshot is. So this only has to inflate the image data and undo the scanline filters.
+ */
+function decodePng(png: Buffer): { width: number; height: number; channels: number; pixels: Buffer } {
+  let width = 0;
+  let height = 0;
+  let channels = 4;
+  const idat: Buffer[] = [];
+
+  for (let at = 8; at < png.length; ) {
+    const length = png.readUInt32BE(at);
+    const type = png.toString('ascii', at + 4, at + 8);
+    const body = png.subarray(at + 8, at + 8 + length);
+    if (type === 'IHDR') {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      if (body[8] !== 8) throw new Error(`expected 8 bits per channel, got ${body[8]}`);
+      if (body[9] === 2) channels = 3;
+      else if (body[9] === 6) channels = 4;
+      else throw new Error(`expected RGB or RGBA, got colour type ${body[9]}`);
+    } else if (type === 'IDAT') {
+      idat.push(body);
+    }
+    at += length + 12;
+  }
+
+  const raw = inflateSync(Buffer.concat(idat));
+  const pixels = Buffer.alloc(width * height * channels);
+  const stride = width * channels;
+
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)] as number;
+    const line = raw.subarray(y * (stride + 1) + 1, y * (stride + 1) + 1 + stride);
+    for (let x = 0; x < stride; x++) {
+      const a = x >= channels ? (pixels[y * stride + x - channels] as number) : 0;
+      const b = y > 0 ? (pixels[(y - 1) * stride + x] as number) : 0;
+      const c = x >= channels && y > 0 ? (pixels[(y - 1) * stride + x - channels] as number) : 0;
+      const value = line[x] as number;
+      let out: number;
+      switch (filter) {
+        case 0: out = value; break;
+        case 1: out = value + a; break;
+        case 2: out = value + b; break;
+        case 3: out = value + ((a + b) >> 1); break;
+        case 4: {
+          const p = a + b - c;
+          const pa = Math.abs(p - a);
+          const pb = Math.abs(p - b);
+          const pc = Math.abs(p - c);
+          out = value + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
+          break;
+        }
+        default: throw new Error(`unknown PNG filter ${filter}`);
+      }
+      pixels[y * stride + x] = out & 0xff;
+    }
+  }
+
+  return { width, height, channels, pixels };
+}
+
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Mean and spread of perceived brightness across a screen patch, both 0..255. */
+async function luminance(page: Page, clip: Box): Promise<{ mean: number; spread: number }> {
+  const shot = decodePng(await page.screenshot({ clip, scale: 'css' }));
+  const pixels = shot.width * shot.height;
+  const values: number[] = [];
+  let total = 0;
+  for (let i = 0; i < pixels; i++) {
+    const at = i * shot.channels;
+    const l =
+      0.2126 * (shot.pixels[at] as number) +
+      0.7152 * (shot.pixels[at + 1] as number) +
+      0.0722 * (shot.pixels[at + 2] as number);
+    values.push(l);
+    total += l;
+  }
+  const mean = total / pixels;
+  let variance = 0;
+  for (const l of values) variance += (l - mean) * (l - mean);
+  return { mean, spread: Math.sqrt(variance / pixels) };
 }
 
 test.describe('the game runs', () => {
@@ -83,7 +174,6 @@ test.describe('the game runs', () => {
   test('round trips a save through the export string', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.getByRole('button', { name: 'Settings' }).click();
-    await page.locator('.settings summary').click();
 
     await page.getByRole('button', { name: 'Export save' }).click();
     const saveString = await page.locator('textarea').inputValue();
@@ -139,7 +229,6 @@ test.describe('the game runs', () => {
     await expect(page.locator('.goal')).toContainText('Gas Giant');
 
     await page.getByRole('button', { name: 'Progress' }).click();
-    await page.locator('.stages summary').click();
     const rows = page.locator('.stages li');
     await expect(rows).toHaveCount(14);
 
@@ -201,7 +290,6 @@ test.describe('the game runs', () => {
     await expect(page.locator('.card .gain').first()).toContainText('%');
 
     await page.getByRole('button', { name: 'Progress' }).click();
-    await page.locator('.achievements summary').click();
     const unlockedBefore = await page.locator('.achievements li.unlocked').count();
 
     await page.locator('.pulse').click();
@@ -239,4 +327,66 @@ test.describe('the game runs', () => {
     expect(await page.locator('.mass').innerText()).not.toBe('');
     void massBefore;
   });
+  // Every body kind the ladder can reach by mass. The last two stages, the neutron star and
+  // the black hole, carry no threshold — they arrive with the supernova in Phase 3 — so they
+  // are covered by `bodies.html` instead, which mounts the field on its own.
+  const BODIES: Array<[string, string, string]> = [
+    ['mote', '50', 'Dust'],
+    ['rock', '5e3', 'Boulder'],
+    ['world', '1e9', 'Planet'],
+    ['gas', '1e11', 'Gas Giant'],
+    ['ember', '1e13', 'Brown Dwarf'],
+    ['star', '1e18', 'Star'],
+  ];
+
+  for (const [kind, mass, label] of BODIES) {
+    test(`draws the ${kind} body with its shader`, async ({ page }) => {
+      // A shader that fails to compile does not throw: Pixi warns and draws nothing, and the
+      // core sprite is held at zero alpha while the mesh owns that slot. So this watches the
+      // console for the failure, and then checks the screen for its consequence.
+      const complaints: string[] = [];
+      page.on('console', (message) => {
+        if (message.type() === 'error' || message.type() === 'warning') complaints.push(message.text());
+      });
+      page.on('pageerror', (error) => complaints.push(String(error)));
+
+      // No particles and no motion. With the field running, a bright drift of infalling
+      // specks across the middle of the screen is enough on its own to pass a brightness
+      // check, so a body that silently draws nothing would sail through — which is exactly
+      // what this is here to catch. Emptying the pool leaves only the body.
+      await seedSave(page, {
+        mass,
+        totalMassEver: mass,
+        settings: { particleBudget: 0, reducedMotion: true },
+      });
+      await page.reload();
+      await expect(page.locator('.stage-name')).toHaveText(label);
+
+      // Give it real frames: a program is compiled on its first draw, not at construction.
+      await page.waitForTimeout(1500);
+      expect(complaints.filter((text) => /shader|program|glsl|compil/i.test(text))).toEqual([]);
+
+      const box = (await page.locator('canvas').boundingBox()) as Box;
+      const centre = await luminance(page, {
+        x: box.x + box.width / 2 - 20,
+        y: box.y + box.height / 2 - 20,
+        width: 40,
+        height: 40,
+      });
+      const empty = await luminance(page, { x: box.x + 8, y: box.y + 8, width: 40, height: 40 });
+
+      // Brighter than empty space, obviously. But brightness alone is not enough: the halo
+      // sprite behind the core is bright too, and a body that compiled and then drew nothing
+      // hides behind it — measured at 15 against a threshold of 13, which is a test that
+      // passes for the wrong reason. So the patch also has to have *structure*: a
+      // terminator, or craters, or belts, or granules. A glow is smooth; a body is not.
+      //
+      // Measured spread with the bodies working runs from 11 (dust, which really is a smooth
+      // cloud) to 45 (the brown dwarf). With the body drawing nothing it is 1. The bound sits
+      // between those, nearer the floor, so neither a dimmer dust cloud nor a smoother star
+      // turns this red without something actually being wrong.
+      expect(centre.mean).toBeGreaterThan(empty.mean * 2 + 6);
+      expect(centre.spread).toBeGreaterThan(6);
+    });
+  }
 });

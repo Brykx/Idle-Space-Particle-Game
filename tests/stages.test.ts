@@ -78,3 +78,60 @@ describe('progress within a stage', () => {
     expect(top.stage.id).toBe('supergiant');
   });
 });
+
+describe('field identity', () => {
+  const ladder = ACCRETION_STAGES;
+
+  it('makes particles steadily bigger and steadily fewer', () => {
+    for (let i = 1; i < ladder.length; i++) {
+      const before = ladder[i - 1]!.look;
+      const after = ladder[i]!.look;
+      expect(after.particleSize, `${ladder[i]!.id} size`).toBeGreaterThan(before.particleSize);
+      expect(after.particleCount, `${ladder[i]!.id} count`).toBeLessThan(before.particleCount);
+    }
+  });
+
+  /**
+   * The rule the whole thing rests on. The field blends additively, so what decides whether
+   * the screen stays readable is the total lit *area* — count x size squared. Let it climb
+   * freely and the late game is a white blowout; hold it exactly flat and the late game feels
+   * no weightier than the early. A gentle rise is the target.
+   */
+  it('keeps the lit area in a narrow band, rising only gently', () => {
+    const area = (s: (typeof ladder)[number]) => s.look.particleCount * s.look.particleSize ** 2;
+    const first = area(ladder[0]!);
+    const last = area(ladder[ladder.length - 1]!);
+
+    expect(last / first).toBeGreaterThan(1.5);
+    expect(last / first).toBeLessThan(4);
+
+    // And monotone, so no stage is a dip or a spike against its neighbours.
+    for (let i = 1; i < ladder.length; i++) {
+      expect(area(ladder[i]!), `${ladder[i]!.id} area`).toBeGreaterThan(area(ladder[i - 1]!));
+    }
+  });
+
+  it('lets early stages loiter and late ones fall hard', () => {
+    for (let i = 1; i < ladder.length; i++) {
+      const before = ladder[i - 1]!.look;
+      const after = ladder[i]!.look;
+      // Tangential speed as a fraction of orbital: nearer 1 holds an orbit, nearer 0 drops in.
+      expect(after.orbit[1], `${ladder[i]!.id} orbit`).toBeLessThan(before.orbit[1]);
+      expect(after.drag, `${ladder[i]!.id} drag`).toBeGreaterThan(before.drag);
+      expect(after.lifetime, `${ladder[i]!.id} lifetime`).toBeLessThanOrEqual(before.lifetime);
+    }
+  });
+
+  it('gives every stage a sane orbit range', () => {
+    for (const stage of STAGES) {
+      const [min, max] = stage.look.orbit;
+      expect(min, stage.id).toBeGreaterThan(0);
+      expect(max, stage.id).toBeGreaterThan(min);
+      // At or above orbital speed a capture trajectory would never come down.
+      expect(max, stage.id).toBeLessThan(1);
+      expect(stage.look.drag, stage.id).toBeGreaterThan(0);
+      expect(stage.look.lifetime, stage.id).toBeGreaterThan(0);
+    }
+  });
+});
+

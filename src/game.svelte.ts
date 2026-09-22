@@ -483,6 +483,12 @@ function createGame() {
       coreScale: look.scale,
       coreColour: look.core,
       particleColour: look.particle,
+      particleSize: look.particleSize,
+      particleCount: look.particleCount,
+      orbit: look.orbit,
+      drag: look.drag,
+      lifetime: look.lifetime,
+      body: look.body,
       budget: state.settings.particleBudget,
       reducedMotion: state.settings.reducedMotion,
     });

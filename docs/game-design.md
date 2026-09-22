@@ -153,6 +153,85 @@ neutron star → black hole                                                  pas
 Driven by lifetime mass, not current mass, so spending never demotes your core. You built
 those upgrades out of what you caught; the core keeps what it was.
 
+### What a stage controls, and what it should
+
+`StageLook` currently carries three things: a core colour, a particle colour, and a core
+scale. That is enough to tell Dust from Gas Giant at a glance, and not enough to make them
+feel like different places.
+
+Four things are missing, in rough order of how much they'd buy:
+
+**Core form — done.** Stages carry a `BodyKind` and each kind is a procedural canvas drawn
+once at start-up. The fix that mattered was not the textures but the blending: the core used
+to be additive, and additive light on a dark background *cannot be dark anywhere*, so a
+boulder could never have a shadowed side however it was drawn. Solid kinds — motes, rocks,
+worlds, gas giants — now draw with normal blending, carrying their silhouette in alpha and
+their lighting in RGB, and occlude the field behind them. Only stars, embers and remnants
+keep the glow, because that is what light actually does. The permanent quarter-of-white wash
+over every core went with it.
+
+**Particle size and count, traded against each other.** This is the one that carries the
+ladder, and it is a single rule rather than two settings:
+
+> As the core climbs, particles get **bigger** and **fewer**.
+
+Dust is a haze of hundreds of specks that barely fall — your gravity is feeble, and what you
+catch is catching *itself* as much as you. By Planet it should be sparse traffic of
+individually visible meteors, each one an event. By Supergiant you are swallowing whole
+moons: a handful of large bodies on screen at a time, each arriving with weight.
+
+Indicative shape across the twelve accretion stages:
+
+| Stage | Size | Count | Reads as |
+|---|---|---|---|
+| Dust | ×0.3 | ×4 | a haze, barely moving inward |
+| Planetesimal | ×0.7 | ×2 | gravel, starting to fall |
+| Asteroid | ×0.9 | ×1.5 | rocks on visible arcs |
+| Planet | ×1.6 | ×0.8 | meteors, each one an event |
+| Brown Dwarf | ×2.5 | ×0.45 | large bodies, sparse |
+| Supergiant | ×4.2 | ×0.22 | moons, one or two at a time |
+
+**Count falls roughly as the inverse square of size**, so the total lit area stays in a narrow
+band. That matters because the field blends additively: hold area roughly constant and the
+screen stays evenly bright while its *character* changes completely. Let the area climb freely
+and the late game is a white blowout; hold it exactly constant and the late game feels no
+weightier than the early. A gentle rise — perhaps two-fold across the whole ladder — is right.
+
+Keep a per-particle size spread at every stage and just move its centre, so each stage has
+variety and the transitions read as gradual rather than as a costume change.
+
+None of this touches the economy. Income is what it was; what changes is what income *looks
+like*. The particle budget slider still caps the whole thing, and at the top of the ladder it
+will barely be reached.
+
+**Field density.** A stage can also widen or narrow the band the particles arrive in, so the
+cloud visibly tightens as the core grows.
+
+The first needs shader work. The other three are extra fields on `StageLook` threaded through
+`FieldRates` — cheap, and they would make the early game read very differently from the late.
+
+### More to buy as you climb
+
+Measured on the current curve: the last new upgrade card — Field Lines, at 1e8 lifetime mass
+— appears about **20 minutes** in. The ladder runs to about **55**. So for the last
+thirty-five minutes the Core tab never changes: the same five cards with bigger numbers on
+them.
+
+The stage ladder tells you that you are growing; the thing you actually interact with does
+not. Two ways to fix it:
+
+- **Second-tier upgrades gated on stages** — a new line that appears at Planet, another at
+  Brown Dwarf, each feeding a term the opening upgrades already feed but from a fresh cost
+  base. Recommended: it reuses the whole upgrades-as-data pipeline, so each one is an entry
+  in `upgrades.ts` and nothing else.
+- **Stage perks** — a one-off choice presented on arrival at each stage. More interesting,
+  much more to author and to balance.
+
+**The constraint either way:** any new multiplicative upgrade adds to the cost-exponent sum,
+and that sum is 0.998 for a reason. A second-tier upgrade must either take over a saturating
+upgrade's share or be tuned so the total still lands near 1. Adding one "because it feels
+good" is precisely how the ×1500 element chain made the game seventy times faster.
+
 ### Why the ladder resets where it does
 
 The physics is mostly honest, and where it isn't, the break is useful.
@@ -258,6 +337,183 @@ The black hole becomes a galactic nucleus; particles become stars, then dust lan
 satellite galaxies. Content here is **challenges** — runs under a restriction ("particles
 repel", "no capture radius", "10x costs") that pay permanent multipliers. Cheap to author,
 high replay, and they exercise systems that already exist.
+
+## Concept: rebased upgrades and what a promotion is worth
+
+*Not built. This is the design for closing the "nothing new to buy after twenty minutes"
+gap, and it starts from an observation that turns out to change the whole shape.*
+
+### Reaching a stage currently gives you nothing
+
+Promotions are cosmetic. The core changes colour and size, the particles change character, a
+banner appears — and your income does not move by a single percent. The ladder tells you that
+you are growing while the thing you interact with does not react at all.
+
+### Density should reset at every stage
+
+The upgrade called *more particles* should go back to zero each time you are promoted, and
+its costs should be **rebased** to the new stage's economy — otherwise, at Supergiant, buying
+two hundred levels from a base of 30 mass costs nothing and the reset means nothing.
+
+Two reasons this is the right upgrade to do it to:
+
+**It says what the visuals now say.** Climbing the ladder makes particles bigger and fewer.
+Density is literally the count. Resetting it at each promotion is the mechanic agreeing with
+the picture: the flow coarsens, and you rebuild it from a new, coarser baseline.
+
+**It turns one static card into a live one at every stage.** Not a new card — the same card,
+mattering again. Twelve times.
+
+### Which forces the interesting part
+
+If Density resets, its contribution stops compounding across the run. It becomes a sawtooth:
+rising inside a stage, dropping at each promotion. Two consequences, and the second is the
+reason this concept is worth writing down.
+
+**A promotion would make your income fall.** Unacceptable on its own. Climbing the ladder must
+never be a punishment.
+
+**The cost-exponent sum would collapse.** Density carries 0.293 of the 0.998 sum. A sawtooth
+contributes almost nothing over the long run, so the sum drops to about 0.71 — well below 1,
+which means the late game stops being exponential and becomes a wall.
+
+Both are fixed by the same thing: **a promotion has to pay.**
+
+### What a promotion is worth, exactly
+
+This is calculable rather than a matter of taste. The ladder spans 17.2 orders of magnitude
+over 11 promotions — about **1.56 orders per stage**. For a per-stage multiplier to carry the
+exponent share Density is giving up:
+
+```
+multiplier = 10 ^ (0.293 × 1.56) = ×2.86
+```
+
+Across the ladder that is ×1.07e5, or 5.0 orders of magnitude — exactly what Density
+contributes today. The swap is clean: the same growth, moved out of a slider you drag and
+into a moment you arrive at.
+
+Round it to **×3 per promotion**, and reaching Planet visibly triples everything.
+
+One judgement call left. At ×2.86 a promotion is roughly neutral — you lose the Density you
+had built and gain about the same back, then get a cheap fresh climb. That is mathematically
+tidy and emotionally flat. Going slightly higher, say ×3.5, makes each promotion a jump you
+can feel, at the cost of pushing the exponent sum above 1 and quickening the late game. Take
+the jump and re-place the stage thresholds afterwards; a promotion that does not feel like a
+reward is a bad promotion, and the balance tool exists precisely so moving thresholds is a
+re-run rather than a guess.
+
+### The same trick rescues the dead upgrades
+
+Gravity Well and Capture Radius feed a capture fraction that saturates towards 1, so they are
+finished about ten minutes in — the cards currently sit there reading `+0.01% income`. If
+capture is rebased per stage as well, on the grounds that a bigger core faces a coarser and
+faster population, both come alive again at every promotion for the same reason Density does.
+
+That is the more ambitious version and it should follow, not lead. Rebasing one upgrade is a
+contained change; rebasing three changes every number in the game at once.
+
+### Genuinely new cards, after that
+
+Rebasing fixes the *pacing* of the Core tab. It does not add variety — it is still five cards.
+New second-tier upgrades, unlocked at stages and feeding the four terms from a fresh cost base,
+are what add that:
+
+| Upgrade | Unlocks at | Feeds | Idea |
+|---|---|---|---|
+| Frame Dragging | Planet | capture | the core's spin drags spacetime, widening the cross-section |
+| Tidal Shear | Brown Dwarf | mass per particle | bodies are torn apart before impact, so less of each escapes |
+| Radiation Pressure | Star | spawn rate | your own light stirs the cloud, sweeping more into reach |
+
+Every one of these adds to the exponent sum, so each must either take share from a tier-one
+upgrade or be tuned small. Adding one because it feels good is exactly how the ×1500 element
+chain once made the game seventy times faster.
+
+### Order of work
+
+1. Per-stage multiplier — a promotion pays ×3. Small, and it makes the ladder mechanical
+   rather than decorative on its own.
+2. Rebase Density, with stage-scaled base costs. The pair above are one change; shipping
+   either alone breaks the curve.
+3. Re-place the stage thresholds against the new curve.
+4. Rebase capture, or add the second-tier cards. Not both at once.
+
+## Beyond the black hole — the second half of the game
+
+*Vision, not a plan. Nothing below should start before Phase 5 ships and people have actually
+played the first half.*
+
+### Why the game needs a third act at all
+
+Acts I to V are one verb: **accretion**. You pull things in, and the reward for pulling well
+is being able to pull harder. The arc ends at a black hole because that is where gravity ends
+— there is nothing further down that road. Adding a fourth prestige that grants more
+multipliers would be the same game with bigger numbers.
+
+The way out is to change the verb. Not "pull harder" but **propagate**: stop being a thing in
+the universe and become the thing a universe comes from.
+
+### The Bounce
+
+The last collapse does not deepen. The core's interior reaches a density where it stops being
+a hole and starts being a beginning: a **Big Bang**, and a new universe on the other side.
+
+This is not invented for the game. Black-hole cosmology — the idea that the interior of a
+black hole buds a new spacetime, and Smolin's cosmological natural selection built on top of
+it — is a real, if speculative, line of thought. It is the one place in this game where the
+physics is a live hypothesis rather than settled, and the game should say so rather than
+pretend otherwise.
+
+**What the Bounce grants is different in kind from Stardust and Singularities.** Those were
+currencies you spent on multipliers. The Bounce grants **Constants**: you tune the physics of
+the universe you are about to create. Stronger gravity means faster accretion but shorter-lived
+stars. A denser early universe means more seeds but a hotter, more hostile start. That is a
+build, not a number — and it is cosmological natural selection as a game mechanic, which is
+exactly what the idea is for.
+
+### Life
+
+In the new universe you seed, a planet does something the last one never did: it stays wet
+long enough. **Life starts at the Planet stage** — the first ladder rung that could ever have
+hosted it — and the second half of the game runs on a ladder that mirrors the first, pointing
+outward instead of inward.
+
+```
+inward, gravity   dust ────────────────────────────> black hole
+                                    ↓ Bounce
+outward, life     tide pool ──────────────────────> Type III civilisation
+```
+
+The natural spine for the outward ladder already exists and is real: the **Kardashev scale**.
+
+| Rung | What you are | What you harvest |
+|---|---|---|
+| Abiogenesis | chemistry that copies itself | gradients |
+| Multicellular | bodies | sunlight |
+| Intelligence | a species that models the world | fire, agriculture |
+| Type I | a planetary civilisation | a planet's energy budget |
+| Type II | a Dyson swarm | a whole star's output |
+| Type III | a galactic civilisation | a galaxy's stars |
+
+Mass stops being the currency somewhere around Type I — you cannot weigh a civilisation
+usefully — and **energy captured** takes over, which is what Kardashev actually measures and
+what the disk already taught the player to think about.
+
+### What this reuses
+
+The particle field does not need replacing, it needs **inverting**. The same pool, the same
+trails, the same budget — but particles are no longer things falling *in* to be eaten. They
+are stars you reach, and they **light up and stay** rather than being absorbed. The core stops
+being a sink and becomes an origin. One renderer, two meanings, and the transition from one
+to the other is the single best visual moment the game could have.
+
+### The honest caveat
+
+This is a second game bolted to the first. It is larger than Acts I to V put together: a new
+economy, a new ladder, a new verb, and a UI that has to hold both. It earns its place only if
+the first half is finished and people want more of it. Written down now so the first half can
+be built without closing the door on it — the stage ladder as data, the renderer behind an
+interface, and the economy with no DOM in it are all already the right shape for this.
 
 ## Supporting systems
 

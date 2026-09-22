@@ -29,8 +29,9 @@ second currency, and a fusion chain from hydrogen to iron that multiplies what e
 particle is worth. The side column is now tabbed, and the Energy tab appears only once there
 is a disk.
 
-Next: the magnetic field's remaining role, and Phase 3's supernova prestige — which is also
-when the iron wall can safely land.
+Next: second-tier upgrades so the Core tab keeps changing past the twenty-minute mark,
+per-stage particle character (size and orbit), and Phase 3's supernova prestige — which is
+also when the iron wall can safely land.
 
 ## Running it
 
@@ -71,6 +72,11 @@ tools/        headless pacing simulation
   stack that follows from it
 - [Game design](docs/game-design.md) — the core formula, upgrades, five acts, prestige layers
 - [Implementation plan](docs/implementation-plan.md) — module layout, phases, testing, risks
+
+## Licence
+
+All rights reserved. The source is public to read and to play; it is not licensed for reuse.
+See [LICENSE](LICENSE).
 
 ## Stack
 

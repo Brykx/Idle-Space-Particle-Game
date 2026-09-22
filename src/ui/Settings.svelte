@@ -34,8 +34,8 @@
   }
 </script>
 
-<details class="settings">
-  <summary>Settings</summary>
+<section class="settings">
+  <h2>Settings</h2>
 
   <div class="row">
     <label for="notation">Numbers</label>
@@ -137,7 +137,7 @@
     <div><dt>Pulses fired</dt><dd class="num">{view.pulses}</dd></div>
     <div><dt>Achievements</dt><dd class="num">{view.achievementsUnlocked}/{view.achievementCount}</dd></div>
   </dl>
-</details>
+</section>
 
 <style>
   .settings {
@@ -147,24 +147,13 @@
     padding: 0.5rem 0.7rem 0.7rem;
   }
 
-  summary {
-    cursor: pointer;
-    font-size: 0.8rem;
-    color: var(--dim);
-    list-style: none;
-  }
-
-  summary::-webkit-details-marker {
-    display: none;
-  }
-
-  summary::before {
-    content: '▸ ';
+  h2 {
+    margin: 0;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
     color: var(--dimmer);
-  }
-
-  details[open] summary::before {
-    content: '▾ ';
   }
 
   .row {
