@@ -139,16 +139,17 @@ Still to do:
   ladder runs to ~55, so the Core tab is static for the final thirty-five minutes.
   Second-tier upgrades gated on stages, tuned so the cost-exponent sum stays near 1. See the
   design doc.
-- **Energy** — a second resource from fusion, with sinks mass cannot buy
-- **Element chain** — H → He → C → O → Fe, gating the star stages, multiplying mass per particle
-- **Magnetic Field** — catches charged particles gravity misses
-- **The iron wall** — fusing iron costs energy; the rate stalls, and that is the prestige prompt
+- **Achievements, the remaining ~37.** 23 are in. The set is meant to reach about 60.
+- **The iron wall** — iron is already listed as unreachable, but reaching the end of the
+  chain does not yet *stall* anything. Making it bite belongs with Phase 3, because a wall
+  with no way through it is the worst state to leave a player in.
 
 **Done when:** a 6-hour session has something new every ~20 minutes.
 
 ### Phase 3 — Supernova prestige (~2 days)
 Reset layers, stardust formula, the permanent tree, nebula restart state, the supernova
-sequence itself. Tab navigation arrives here, because now there is enough to need it.
+sequence itself, and the iron wall that prompts it. Tabs already arrived in Phase 2, so the
+navigation for it exists.
 
 **Done when:** run 2 reaches the Brown Dwarf stage in under a third of run 1's time and feels
 different doing it.
@@ -177,20 +178,24 @@ Second prestige, Hawking radiation, jets, time dilation, lensing shader, the cha
 framework, endgame content.
 
 ### Phase 6 — Ship (~2 days)
-Balance pass driven by `tools/balance.ts`, mobile layout, PWA, Playwright smoke test,
-performance profiling on a real low-end device, README and screenshots.
+Balance pass driven by `tools/balance.ts`, mobile layout, PWA, performance profiling on a
+real low-end device, README and screenshots. The Playwright smoke suite landed in Phase 1 and
+has grown with each phase since.
 
 ## Testing strategy
 
 The economy is pure, so it gets real tests rather than token ones:
 
 - **Determinism** — same seed + same inputs ⇒ byte-identical state after 10k ticks.
-- **Offline equivalence** — 3600 ticks of 1 s and 36 ticks of 100 s land within tolerance.
-  This is the bug that eats a weekend; catch it in Phase 1.
+- **Offline fidelity** — an absence must pay close to what being present pays, measured
+  *relative to what was gained* rather than in absolute orders of magnitude, and the
+  integration must be converged at the step size offline actually uses. Auto-buyers turned
+  this from a formality into the sharpest test in the suite.
 - **Cost curves** — `buyMax` spends exactly the geometric sum, never one credit over.
 - **Save migrations** — a stored fixture per version, each one loading into current state.
-- **Pacing** — `balance.test.ts` asserts time-to-milestone inside generous bounds, so a
-  tuning tweak that doubles the first hour fails CI instead of shipping.
+- **Pacing** — `balance.test.ts` asserts time-to-stage inside generous bounds, and compares
+  the curve's early slope against its late slope, so a tuning tweak that doubles the first
+  hour, opens a wall, or collapses the late game fails CI instead of shipping.
 
 Rendering gets one Playwright smoke test (load, buy, reload, mass persisted) and otherwise
 gets looked at by a human, which is the honest way to test a particle field.
@@ -208,7 +213,8 @@ gets looked at by a human, which is the honest way to test a particle field.
 | Offline quietly pays less than being present | Auto-buyers make income a feedback loop, so the catch-up step size now sets accuracy, not just speed. Steps are capped at half a second while automation is running (60s when it is not, where the rate barely moves), and a test asserts the integration is converged at that step |
 | Scope drift into Acts IV-V | Phases ship independently; the game is releasable from the end of Phase 3 |
 
-## Suggested first commit after approval
+## What is open
 
-Phase 0 and Phase 1 together, so the first thing reviewed is something playable rather than
-a folder of config.
+Phases 2 through 6, in the order above. The game is releasable from the end of Phase 3; the
+three items most worth doing next are the two reported from play — second-tier upgrades so
+the Core tab keeps changing, and per-stage particle character — and then the supernova.
