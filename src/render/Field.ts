@@ -40,6 +40,8 @@ export interface FieldRates {
   drag: number;
   /** Seconds before an unabsorbed particle gives up. */
   lifetime: number;
+  /** How far out particles are drawn from, as a fraction of the screen's own reach. */
+  width: number;
   /** Which family of body the core is, and therefore how it is drawn. */
   body: BodyKind;
   /** Maximum live particles. */
@@ -209,6 +211,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     orbit: [0.6, 0.9],
     drag: 0.06,
     lifetime: 26,
+    width: 1,
     body: 'mote',
     budget: 1200,
     reducedMotion: false,
@@ -219,13 +222,20 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     scale: rates.coreScale,
     core: unpack(INITIAL_CORE),
     particle: unpack(INITIAL_PARTICLE),
-    // Size and count ease too, so a promotion is a field that thins and coarsens over a
-    // couple of seconds rather than a cut.
+    // Size, count and width ease too, so a promotion is a field that thins, coarsens and
+    // draws in over a couple of seconds rather than a cut.
     particleSize: rates.particleSize,
     particleCount: rates.particleCount,
+    width: rates.width,
   };
 
-  const geo: FieldGeometry = { centreX: 0, centreY: 0, spawnRadius: 400, coreRadius: CORE_MIN_RADIUS };
+  const geo: FieldGeometry = {
+    centreX: 0,
+    centreY: 0,
+    spawnRadius: 400,
+    viewRadius: 400,
+    coreRadius: CORE_MIN_RADIUS,
+  };
 
   /** Decays to 1; above 1 while a pulse is in flight. */
   /** 0..1, ramps up after a body change while the previous body fades out. */
@@ -294,7 +304,9 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     geo.centreY = height / 2;
     // Just past the corner: far enough that nothing pops into view, close enough that the
     // field does not spend its whole budget on particles nobody can see.
-    geo.spawnRadius = Math.max(220, (Math.hypot(width, height) / 2) * 1.04);
+    // Just past the corner: far enough that a full-width field never pops into view, close
+    // enough that it does not spend its budget on particles nobody can see.
+    geo.viewRadius = Math.max(220, (Math.hypot(width, height) / 2) * 1.04);
     halo.position.set(geo.centreX, geo.centreY);
     core.position.set(geo.centreX, geo.centreY);
     corePrevious.position.set(geo.centreX, geo.centreY);
@@ -327,6 +339,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     shown.scale += (rates.coreScale - shown.scale) * k;
     shown.particleSize += (rates.particleSize - shown.particleSize) * k;
     shown.particleCount += (rates.particleCount - shown.particleCount) * k;
+    shown.width += (rates.width - shown.width) * k;
     easeColour(shown.core, rates.coreColour, k);
     easeColour(shown.particle, rates.particleColour, k);
 
@@ -351,6 +364,8 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     const trail = rates.reducedMotion ? 0 : 1;
 
     geo.coreRadius = lerp(CORE_MIN_RADIUS, CORE_MAX_RADIUS, shown.scale);
+    // Never inside the core itself, whatever a stage asks for.
+    geo.spawnRadius = Math.max(geo.coreRadius * 2.5, geo.viewRadius * shown.width);
 
     pool.emit(dt, emission, geo, tuning, rates.captureFraction);
     pool.update(dt, geo, tuning, pulseStrength);

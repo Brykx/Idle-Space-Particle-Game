@@ -11,8 +11,20 @@
 export interface FieldGeometry {
   centreX: number;
   centreY: number;
-  /** Particles appear out here. */
+  /**
+   * Particles appear out here. Narrower than `viewRadius` at the late stages, where the
+   * field draws from close in rather than from everywhere.
+   */
   spawnRadius: number;
+  /**
+   * How far the screen itself reaches from the centre.
+   *
+   * Separate from `spawnRadius`, and it has to be: a flyby that swings wide must not be
+   * culled while it is still visible, and nothing should brighten on approach relative to a
+   * rim it never came from. These were one number until the field got a width per stage, at
+   * which point every use of it meant one of the two and not the other.
+   */
+  viewRadius: number;
   /** Absorbed once inside this. */
   coreRadius: number;
 }
@@ -51,6 +63,16 @@ export class ParticlePool {
   vy!: Float32Array;
   /** Seconds of life remaining. */
   ttl!: Float32Array;
+  /**
+   * Seconds this particle was given when it spawned.
+   *
+   * Stored rather than inferred from the stage's `lifetime`, because a particle's life is
+   * that figure times a random 0.7 to 1.3 and is not the figure itself. The fade-in used to
+   * be computed as `lifetime - ttl`, which is *negative* for the three particles in ten that
+   * drew a longer life than average — so they were held at zero alpha for their first
+   * seconds and simply were not there. It had been that way since the pool was written.
+   */
+  life!: Float32Array;
   /** 0..1, fades in on spawn and out on death. */
   alpha!: Float32Array;
   /** Visual size multiplier. */
@@ -84,6 +106,7 @@ export class ParticlePool {
     this.vx = new Float32Array(n);
     this.vy = new Float32Array(n);
     this.ttl = new Float32Array(n);
+    this.life = new Float32Array(n);
     this.alpha = new Float32Array(n);
     this.size = new Float32Array(n);
     this.active = new Uint8Array(n);
@@ -157,7 +180,8 @@ export class ParticlePool {
     this.vx[i] = tx * tangential + rx * radial;
     this.vy[i] = ty * tangential + ry * radial;
 
-    this.ttl[i] = tuning.lifetime * (0.7 + Math.random() * 0.6);
+    this.life[i] = tuning.lifetime * (0.7 + Math.random() * 0.6);
+    this.ttl[i] = this.life[i] as number;
     this.alpha[i] = 0;
     this.size[i] = 0.55 + Math.random() * 0.75;
     this.active[i] = 1;
@@ -188,7 +212,7 @@ export class ParticlePool {
   update(dt: number, geo: FieldGeometry, tuning: PoolTuning, pulseStrength = 1): void {
     const gm = tuning.gravity * pulseStrength;
     const coreR2 = geo.coreRadius * geo.coreRadius;
-    const killR = geo.spawnRadius * 1.9;
+    const killR = geo.viewRadius * 1.9;
     const killR2 = killR * killR;
     const minR2 = MIN_RADIUS * MIN_RADIUS;
 
@@ -229,12 +253,23 @@ export class ParticlePool {
         continue;
       }
 
-      // Fade in quickly, fade out over the last second, and brighten as it nears the core.
-      const fadeIn = Math.min(1, (tuning.lifetime - ttl) * 4);
+      // Fade in over about three quarters of a second, measured from this particle's own
+      // age, and fade out over its last. The fade-in used to be four times quicker, which was
+      // invisible while everything spawned off-screen; once the late stages started emitting
+      // inside the frame it read as a pop.
+      const fadeIn = Math.min(1, ((this.life[i] as number) - ttl) * 1.4);
       const fadeOut = Math.min(1, ttl);
       // Brighten steeply on approach: the last stretch into the core is the part worth watching.
-      const proximity = 0.45 + 0.55 * Math.min(1, (geo.spawnRadius * 0.5) / Math.max(r, 1));
-      this.alpha[i] = Math.min(1, fadeIn * fadeOut * proximity);
+      const proximity = 0.45 + 0.55 * Math.min(1, (geo.viewRadius * 0.5) / Math.max(r, 1));
+
+      // And dim beyond the field's own edge. A flyby swings wider than it started, so
+      // spawning closer in does nothing to how wide the traffic *looks* unless the field
+      // actually ends somewhere: without this, narrowing the spawn ring moved where
+      // particles appear and changed nothing anybody could see.
+      const beyond = r - geo.spawnRadius * 1.15;
+      const outer = beyond <= 0 ? 1 : Math.max(0, 1 - beyond / (geo.viewRadius * 0.45));
+
+      this.alpha[i] = Math.min(1, fadeIn * fadeOut * proximity * outer);
     }
   }
 

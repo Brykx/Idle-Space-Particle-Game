@@ -67,6 +67,20 @@ export interface StageLook {
 
   /** Seconds before an unabsorbed particle gives up. Long enough early to allow real orbits. */
   lifetime: number;
+
+  /**
+   * How far out the field reaches, as a fraction of the screen's own reach.
+   *
+   * The last piece of field identity, and it says the same thing the other four do from a
+   * different direction. Dust is a cloud you are sitting inside: it fills the frame and comes
+   * from everywhere. A supergiant's traffic is close-in and fast — a handful of bodies on
+   * tight orbits, with the far field empty because anything out there was swept up long ago.
+   *
+   * Narrowing it also buys back what bigger particles cost. Late-stage bodies are drawn many
+   * times the size of a dust mote, so spreading the same few of them over the whole screen is
+   * what makes the top of the ladder look emptier than the bottom despite weighing more.
+   */
+  width: number;
 }
 
 export interface Stage {
@@ -97,6 +111,7 @@ export const STAGES: Stage[] = [
       orbit: [0.6, 0.9],
       drag: 0.06,
       lifetime: 26,
+      width: 1.0,
     },
   },
   {
@@ -111,6 +126,7 @@ export const STAGES: Stage[] = [
       orbit: [0.55, 0.85],
       drag: 0.09,
       lifetime: 23,
+      width: 0.97,
     },
   },
   {
@@ -125,6 +141,7 @@ export const STAGES: Stage[] = [
       orbit: [0.5, 0.8],
       drag: 0.12,
       lifetime: 20,
+      width: 0.93,
     },
   },
   {
@@ -139,6 +156,7 @@ export const STAGES: Stage[] = [
       orbit: [0.45, 0.74],
       drag: 0.15,
       lifetime: 18,
+      width: 0.88,
     },
   },
   {
@@ -153,6 +171,7 @@ export const STAGES: Stage[] = [
       orbit: [0.4, 0.68],
       drag: 0.19,
       lifetime: 16,
+      width: 0.83,
     },
   },
   {
@@ -167,6 +186,7 @@ export const STAGES: Stage[] = [
       orbit: [0.35, 0.62],
       drag: 0.23,
       lifetime: 15,
+      width: 0.78,
     },
   },
   {
@@ -181,6 +201,7 @@ export const STAGES: Stage[] = [
       orbit: [0.3, 0.55],
       drag: 0.28,
       lifetime: 13,
+      width: 0.72,
     },
   },
   {
@@ -195,6 +216,7 @@ export const STAGES: Stage[] = [
       orbit: [0.26, 0.48],
       drag: 0.33,
       lifetime: 12,
+      width: 0.66,
     },
   },
   {
@@ -209,6 +231,7 @@ export const STAGES: Stage[] = [
       orbit: [0.22, 0.42],
       drag: 0.38,
       lifetime: 11,
+      width: 0.6,
     },
   },
   {
@@ -223,6 +246,7 @@ export const STAGES: Stage[] = [
       orbit: [0.18, 0.37],
       drag: 0.44,
       lifetime: 10,
+      width: 0.55,
     },
   },
   {
@@ -237,6 +261,7 @@ export const STAGES: Stage[] = [
       orbit: [0.15, 0.32],
       drag: 0.5,
       lifetime: 9,
+      width: 0.5,
     },
   },
   {
@@ -251,6 +276,7 @@ export const STAGES: Stage[] = [
       orbit: [0.12, 0.28],
       drag: 0.58,
       lifetime: 8,
+      width: 0.46,
     },
   },
 
@@ -267,6 +293,7 @@ export const STAGES: Stage[] = [
       orbit: [0.1, 0.24],
       drag: 0.7,
       lifetime: 9,
+      width: 0.62,
     },
   },
   {
@@ -281,6 +308,7 @@ export const STAGES: Stage[] = [
       orbit: [0.08, 0.2],
       drag: 0.8,
       lifetime: 10,
+      width: 0.8,
     },
   },
 ];

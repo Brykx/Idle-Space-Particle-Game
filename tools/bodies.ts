@@ -34,6 +34,7 @@ const rates: FieldRates = {
   orbit: stage.look.orbit,
   drag: stage.look.drag,
   lifetime: stage.look.lifetime,
+  width: stage.look.width,
   body: stage.look.body,
   budget: 1200,
   reducedMotion: false,
@@ -60,6 +61,7 @@ if (other) {
         orbit: look.orbit,
         drag: look.drag,
         lifetime: look.lifetime,
+        width: look.width,
         body: look.body,
       });
     }, 4000);

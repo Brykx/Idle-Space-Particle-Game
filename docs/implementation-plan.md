@@ -228,7 +228,20 @@ which is the only place that body appears in the game.
   `textures.ts` stays as the fallback for a renderer that cannot run GLSL, and `bodies.html`
   (dev only, not in the build) mounts the field on its own so the last two stages — which
   carry no mass threshold and arrive with the supernova — can be looked at at all.
-- Field **width** per stage, the one part of field identity still open.
+- **Field width per stage — done, and it is the weakest of the five levers.** `StageLook`
+  carries a `width`, and the field narrows from filling the frame at Dust to 0.46 of it at
+  Supergiant. Narrowing the spawn ring alone changed nothing visible, because a flyby swings
+  wider than it started: the field only reads as having an edge once particles dim beyond it,
+  which is the rule that had to be added to make the feature exist at all. Even then the
+  effect is subtle next to size, count, orbit and body. Kept, but it earns less than the
+  other four.
+
+  Two real things came out of building it. `spawnRadius` and the screen's own reach were one
+  number, and every use of it meant one of the two — the kill radius and the approach
+  brightening both wanted the screen, the emission ring wanted the stage. And the particle
+  fade-in was computed against the stage's `lifetime` rather than against the particle's own,
+  which is a *negative* alpha for the three in ten that draw a longer life than average. They
+  had been invisible for their first seconds since the pool was written.
 - Bloom, camera easing, audio layer.
 
 The Phase 1 renderer interface means all of this touches `render/` only.
