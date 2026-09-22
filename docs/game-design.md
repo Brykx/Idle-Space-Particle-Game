@@ -338,22 +338,24 @@ satellite galaxies. Content here is **challenges** — runs under a restriction 
 repel", "no capture radius", "10x costs") that pay permanent multipliers. Cheap to author,
 high replay, and they exercise systems that already exist.
 
-## Concept: rebased upgrades and what a promotion is worth
+## Rebased upgrades and what a promotion is worth
 
-*Not built. This is the design for closing the "nothing new to buy after twenty minutes"
-gap, and it starts from an observation that turns out to change the whole shape.*
+*Built. The concept below survived contact with the balance tool; two of its numbers did
+not, and what replaced them is the interesting part.*
 
-### Reaching a stage currently gives you nothing
+### Reaching a stage used to give you nothing
 
-Promotions are cosmetic. The core changes colour and size, the particles change character, a
-banner appears — and your income does not move by a single percent. The ladder tells you that
-you are growing while the thing you interact with does not react at all.
+Promotions were cosmetic. The core changed colour and size, the particles changed character,
+a banner appeared — and income did not move by a single percent. The ladder told you that you
+were growing while the thing you interact with did not react at all.
 
-### Density should reset at every stage
+### Density resets at every promotion
 
-The upgrade called *more particles* should go back to zero each time you are promoted, and
-its costs should be **rebased** to the new stage's economy — otherwise, at Supergiant, buying
-two hundred levels from a base of 30 mass costs nothing and the reset means nothing.
+*More particles* goes back to zero each time you are promoted, and its cost is **rebased** to
+the new stage — otherwise, at Supergiant, buying two hundred levels from a base of 30 mass
+costs nothing and the reset means nothing. The rebase is taken from the ladder's own
+thresholds (`costScaleAt`), so moving a threshold moves the pricing with it instead of
+silently changing how many levels a stage is worth.
 
 Two reasons this is the right upgrade to do it to:
 
@@ -362,62 +364,82 @@ Density is literally the count. Resetting it at each promotion is the mechanic a
 the picture: the flow coarsens, and you rebuild it from a new, coarser baseline.
 
 **It turns one static card into a live one at every stage.** Not a new card — the same card,
-mattering again. Twelve times.
+mattering again. Eleven times.
 
-### Which forces the interesting part
+### Which forces a promotion to pay
 
-If Density resets, its contribution stops compounding across the run. It becomes a sawtooth:
-rising inside a stage, dropping at each promotion. Two consequences, and the second is the
-reason this concept is worth writing down.
+A rebased upgrade stops compounding across the run, so whatever it contributed has to come
+from somewhere else. Measured with the promotion multiplier switched off, the rebase alone
+drops the curve from exponential to polynomial: 11.2 orders of magnitude after twenty-four
+hours, against the whole ladder's 19.2. That is the wall the concept predicted, and it is why
+the two halves are one change.
 
-**A promotion would make your income fall.** Unacceptable on its own. Climbing the ladder must
-never be a punishment.
+### What a promotion is worth: the part the concept got wrong
 
-**The cost-exponent sum would collapse.** Density carries 0.293 of the 0.998 sum. A sawtooth
-contributes almost nothing over the long run, so the sum drops to about 0.71 — well below 1,
-which means the late game stops being exponential and becomes a wall.
+The original answer was a flat **x3**, from `10 ^ (0.293 x 1.56)` — Density's cost exponent
+times the ladder's average gap. Building it showed two problems.
 
-Both are fixed by the same thing: **a promotion has to pay.**
+**A flat multiplier is not one number.** The ladder's gaps run from 1.18 orders of magnitude
+early to 2.3 late, so the same x3 is worth 0.40 of the growth exponent at the bottom and 0.21
+at the top — strongest exactly where the game is most fragile. Measured, x1.8 took eight and
+a half hours to reach Supergiant and x2.2 took ninety minutes, with nothing stable in
+between, because nothing in between was the same number twice.
 
-### What a promotion is worth, exactly
+So the multiplier is **derived from the gap** instead: each promotion is worth
+`10 ^ (share x gap)`, which contributes exactly `share` wherever it lands. The response to
+tuning becomes smooth and monotone, and late promotions come out larger than early ones,
+which is both what the maths wants and what a promotion should feel like. Cumulatively the
+product telescopes into `costScaleAt(stage) ^ share` — the same ladder scale that reprices
+Density. One idea, used twice: what the ladder takes on the cost side it hands back on the
+income side.
 
-This is calculable rather than a matter of taste. The ladder spans 17.2 orders of magnitude
-over 11 promotions — about **1.56 orders per stage**. For a per-stage multiplier to carry the
-exponent share Density is giving up:
+**The share is not Density's exponent.** 0.293 was derived on the assumption that a rebased
+Density gives up exactly its own contribution. Measured, 0.293 finished the ladder in 54
+minutes with income doubling every 55 seconds — and that was against a bot with a separate
+bug (below). Against a corrected bot the settled value is **0.24**, giving 1h 16m to
+Supergiant and a 78-second doubling time, both mid-range.
 
-```
-multiplier = 10 ^ (0.293 × 1.56) = ×2.86
-```
+### The bot was buying things no player would
 
-Across the ladder that is ×1.07e5, or 5.0 orders of magnitude — exactly what Density
-contributes today. The swap is clean: the same growth, moved out of a slider you drag and
-into a moment you arrive at.
+While tuning, gain-per-purchase fell from 1.2% to 0.4%, below the design floor. The cause was
+not the change: 57% of the bot's decisions were going into Gravity Well and Capture Radius at
+a measured **0.0%** income gain each.
 
-Round it to **×3 per promotion**, and reaching Planet visibly triples everything.
+Capture saturates towards 1 without ever reaching it, so those two keep a positive gain
+forever — vanishingly small, but never zero, and therefore never infinite payback. Once
+everything else was expensive they remained the best finite score, and the bot bought max of
+them. No player does that; the per-upgrade toggles exist precisely so a human can stop buying
+a card reading "+0.0% income".
 
-One judgement call left. At ×2.86 a promotion is roughly neutral — you lose the Density you
-had built and gain about the same back, then get a cheap fresh climb. That is mathematically
-tidy and emotionally flat. Going slightly higher, say ×3.5, makes each promotion a jump you
-can feel, at the cost of pushing the exponent sum above 1 and quickening the late game. Take
-the jump and re-place the stage thresholds afterwards; a promotion that does not feel like a
-reward is a bad promotion, and the balance tool exists precisely so moving thresholds is a
-re-run rather than a guess.
+Adding a payback ceiling to the bot was a change to the measuring instrument made after
+seeing a number worth disliking, which is the moment to be most careful. The defence is that
+the rule is stated in the player's terms rather than tuned to a target — an upgrade that will
+not repay itself within an hour is one you buy something else instead of — and that every
+consequence was re-measured rather than assumed. With the ceiling in, gain per purchase is
+16.5%, and every one of the bot's decisions is a purchase that moves income.
 
-### The same trick rescues the dead upgrades
+It also means the historical numbers in this document and the old bot's numbers are not
+comparable. Anything measured before the ceiling was measured against a player who could not
+read their own screen.
 
-Gravity Well and Capture Radius feed a capture fraction that saturates towards 1, so they are
-finished about ten minutes in — the cards currently sit there reading `+0.01% income`. If
-capture is rebased per stage as well, on the grounds that a bigger core faces a coarser and
-faster population, both come alive again at every promotion for the same reason Density does.
+### Levels and investment are now different things
 
-That is the more ambitious version and it should follow, not lead. Rebasing one upgrade is a
-contained change; rebasing three changes every number in the game at once.
+The auto-buy unlock used to read the current level. A rebased upgrade resets, so that
+confiscated an auto-buyer the player had already earned, once per promotion. `levelsEver`
+records levels ever bought and never decreases, and the unlock reads that instead — one rule
+for every upgrade rather than an exception for the rebased ones.
 
-### Genuinely new cards, after that
+### Still open here
 
-Rebasing fixes the *pacing* of the Core tab. It does not add variety — it is still five cards.
-New second-tier upgrades, unlocked at stages and feeding the four terms from a fresh cost base,
-are what add that:
+Gravity Well and Capture Radius remain finished about ten minutes in, and the cards honestly
+read `+0.00% income`. Rebasing them was considered and rejected: capture is bounded at 1, so
+resetting it costs a fixed ~4x at every promotion, and the promotion multiplier would have to
+be inflated by the same 4x to cancel it. Two large numbers whose visible net effect is what
+you would get from neither is not a mechanic, it is bookkeeping.
+
+The honest reading is that capture is an **onboarding** term, not a growth term: bounded,
+front-loaded, and finished by design. What the late game needs is not a repaired capture card
+but genuinely new ones.
 
 | Upgrade | Unlocks at | Feeds | Idea |
 |---|---|---|---|
@@ -426,17 +448,8 @@ are what add that:
 | Radiation Pressure | Star | spawn rate | your own light stirs the cloud, sweeping more into reach |
 
 Every one of these adds to the exponent sum, so each must either take share from a tier-one
-upgrade or be tuned small. Adding one because it feels good is exactly how the ×1500 element
+upgrade or be tuned small. Adding one because it feels good is exactly how the x1500 element
 chain once made the game seventy times faster.
-
-### Order of work
-
-1. Per-stage multiplier — a promotion pays ×3. Small, and it makes the ladder mechanical
-   rather than decorative on its own.
-2. Rebase Density, with stage-scaled base costs. The pair above are one change; shipping
-   either alone breaks the curve.
-3. Re-place the stage thresholds against the new curve.
-4. Rebase capture, or add the second-tier cards. Not both at once.
 
 ## Beyond the black hole — the second half of the game
 

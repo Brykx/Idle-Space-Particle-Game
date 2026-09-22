@@ -138,12 +138,13 @@ risk table.
 
 Still to do:
 
-- **A promotion should pay, and Density should rebase** — the last new upgrade card appears
-  ~20 minutes in and the ladder runs to ~55, and reaching a stage currently moves income by
-  nothing at all. The design is worked out in the design doc: Density resets and rebases at
-  each stage, and a promotion grants x3 to carry the exponent share Density gives up. The two
-  are one change — shipping either alone either makes promotion a punishment or collapses the
-  cost-exponent sum to 0.71 and walls the late game. Second-tier cards follow after.
+- **A promotion pays, and Density rebases — done.** Reaching a stage multiplies income by
+  `10 ^ (share x gap)`, derived from the ladder's own thresholds rather than fixed, and
+  Particle Density resets and reprices at every promotion. The two are one change: shipping
+  either alone either makes a promotion a punishment or collapses the curve to polynomial.
+  Written up in the design doc, including the two numbers the concept got wrong and the bot
+  bug the tuning uncovered. Save version 2, with the first migration this project has
+  actually run.
 - **Achievements, the remaining ~37.** 23 are in. The set is meant to reach about 60.
 - **The iron wall** — iron is already listed as unreachable, but reaching the end of the
   chain does not yet *stall* anything. Making it bite belongs with Phase 3, because a wall

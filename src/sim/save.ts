@@ -1,6 +1,6 @@
 import { D } from './numbers';
 import { SAVE_VERSION, cloneState, initialState, type GameState } from './state';
-import { UPGRADE_IDS } from './upgrades';
+import { REBASED_UPGRADE_IDS, UPGRADE_IDS } from './upgrades';
 import { stageIndexFor } from './stages';
 import { ACHIEVEMENTS } from './achievements';
 
@@ -21,7 +21,36 @@ export interface SaveBlob {
 
 /** from-version -> function producing the next version's shape. */
 const MIGRATIONS: Record<number, (raw: SaveBlob) => SaveBlob> = {
-  // 1 -> 2 will live here.
+  /**
+   * 1 -> 2: Particle Density became a rebased upgrade. It resets at every promotion and is
+   * repriced to the stage, and the ladder pays a multiplier to make up for what it gives up.
+   *
+   * A version 1 save holds Density levels bought under flat pricing, which belong to no
+   * stage at all. This applies the new rule from where the player is standing: the rebased
+   * levels go, and `rebasedStage` records that it has been done so the next tick does not do
+   * it again.
+   *
+   * Zeroing levels in a migration is not something to do lightly, and the alternative was
+   * considered: keep them, and credit them to the current stage. That leaves the card priced
+   * against a base the player is many orders short of, so it reads as a dead button until
+   * the next promotion — a worse outcome that merely looks gentler. Taking the reset up front
+   * hands back a card that works, and the promotion multiplier arriving in the same version
+   * pays for most of what is lost.
+   */
+  1: (raw) => {
+    const levels = { ...((raw.levels ?? {}) as Record<string, unknown>) };
+    // Carried over *before* the reset, so the levels the player bought still count as
+    // investment and their auto-buyers survive the migration.
+    const levelsEver = { ...levels };
+    for (const id of REBASED_UPGRADE_IDS) levels[id] = 0;
+    return {
+      ...raw,
+      version: 2,
+      levels,
+      levelsEver,
+      rebasedStage: stageIndexFor(asDecimal(raw.totalMassEver, '0')),
+    };
+  },
 };
 
 export function serialize(s: GameState): SaveBlob {
@@ -32,11 +61,13 @@ export function serialize(s: GameState): SaveBlob {
     energy: s.energy.toString(),
     totalEnergyEver: s.totalEnergyEver.toString(),
     levels: { ...s.levels },
+    levelsEver: { ...s.levelsEver },
     autoBuy: { ...s.autoBuy },
     achievements: [...s.achievements],
     playTime: s.playTime,
     pulseReadyAt: s.pulseReadyAt,
     stageSeen: s.stageSeen,
+    rebasedStage: s.rebasedStage,
     lastSeen: s.lastSeen,
     settings: { ...s.settings },
     stats: { ...s.stats },
@@ -81,9 +112,14 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
   const base = initialState(now);
 
   const levelsRaw = (blob.levels ?? {}) as Record<string, unknown>;
+  const everRaw = (blob.levelsEver ?? {}) as Record<string, unknown>;
   const autoBuyRaw = (blob.autoBuy ?? {}) as Record<string, unknown>;
   for (const id of UPGRADE_IDS) {
-    base.levels[id] = Math.max(0, Math.floor(asFiniteNumber(levelsRaw[id], 0)));
+    const level = Math.max(0, Math.floor(asFiniteNumber(levelsRaw[id], 0)));
+    base.levels[id] = level;
+    // Never below the current level: a save that predates this field, or one that lost it,
+    // should not read as less invested than it plainly is.
+    base.levelsEver[id] = Math.max(level, Math.floor(asFiniteNumber(everRaw[id], 0)));
     base.autoBuy[id] = autoBuyRaw[id] === true;
   }
 
@@ -108,6 +144,9 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
     pulseReadyAt: Math.max(0, asFiniteNumber(blob.pulseReadyAt, 0)),
     // A save written before stages existed should not announce a backlog of them on load.
     stageSeen: Math.max(0, Math.floor(asFiniteNumber(blob.stageSeen, stageIndexFor(totalMassEver)))),
+    // Defaulting to the current stage, not to zero: a save that somehow lost this field
+    // should not wipe the player's rebased levels on the next tick for no reason.
+    rebasedStage: Math.max(0, Math.floor(asFiniteNumber(blob.rebasedStage, stageIndexFor(totalMassEver)))),
     achievements,
     lastSeen: asFiniteNumber(blob.lastSeen, now),
     settings: {

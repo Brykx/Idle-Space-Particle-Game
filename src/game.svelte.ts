@@ -6,6 +6,7 @@ import {
   deriveRates,
   isUnlocked,
   nextCost,
+  promotionMultiplier,
   pulse as pulseEconomy,
   tick,
 } from './sim/economy';
@@ -62,6 +63,8 @@ export interface UpgradeView {
   autoBuyUnlocked: boolean;
   /** Level this upgrade must reach before it will buy itself. */
   autoBuyAt: number;
+  /** Resets to zero at every promotion, and is repriced to the new stage. */
+  rebased: boolean;
   currency: 'mass' | 'energy';
 }
 
@@ -105,6 +108,10 @@ export interface View {
   stageFraction: number;
   nextStageName: string;
   nextStageThreshold: string;
+  /** What the ladder is paying right now, e.g. "x24". Empty at the bottom, where it pays nothing. */
+  ladderBonus: string;
+  /** What the next promotion would multiply income by, e.g. "x2.9". Empty at the top. */
+  nextPromotion: string;
   stages: StageRowView[];
 
   /** Set when something is unlocked; clears itself after a few seconds. */
@@ -174,6 +181,8 @@ function emptyView(): View {
     stageFraction: 0,
     nextStageName: '',
     nextStageThreshold: '',
+    ladderBonus: '',
+    nextPromotion: '',
     stages: [],
     announceEyebrow: '',
     announceTitle: '',
@@ -315,6 +324,13 @@ function createGame() {
       ? format(progress.next.threshold, notation)
       : '';
 
+    // The ladder has to be visibly worth climbing, or this is the old problem wearing a
+    // different hat: the multiplier is real but folded into a number nobody attributes to it.
+    view.ladderBonus = rates.promotionMultiplier > 1.005 ? `x${rates.promotionMultiplier.toFixed(2)}` : '';
+    view.nextPromotion = progress.next
+      ? `x${(promotionMultiplier(progress.index + 1) / rates.promotionMultiplier).toFixed(2)}`
+      : '';
+
     view.stages = STAGES.map((stage, index) => ({
       id: stage.id,
       name: stage.name,
@@ -335,14 +351,16 @@ function createGame() {
     view.spawnRate = rates.spawnRate.toFixed(1);
     view.captureFraction = `${(rates.captureFraction * 100).toFixed(1)}%`;
     view.massPerParticle = format(rates.massPerParticle, notation);
-    view.globalMultiplier = `x${rates.globalMultiplier.toFixed(2)}`;
+    // Shown without the ladder's share, which gets its own line. Multiplying them together
+    // is the reader's job and the breakdown says so.
+    view.globalMultiplier = `x${(rates.globalMultiplier / rates.promotionMultiplier).toFixed(2)}`;
 
     const buildRow = (def: (typeof UPGRADE_LIST)[number]): UpgradeView => {
       const cost = nextCost(state, def.id);
       const wallet = def.currency === 'energy' ? state.energy : state.mass;
       const income = def.currency === 'energy' ? rates.energyPerSecond : rates.massPerSecond;
       const affordable = wallet.gte(cost);
-      const best = maxAffordable(def, state.levels[def.id], wallet);
+      const best = maxAffordable(def, state.levels[def.id], wallet, rates.stage);
       const seconds = affordable
         ? 0
         : income.lte(0)
@@ -386,6 +404,7 @@ function createGame() {
         autoBuy: state.autoBuy[def.id],
         autoBuyUnlocked: autoBuyUnlocked(state, def.id),
         autoBuyAt: AUTO_BUY_LEVEL,
+        rebased: def.rebased === true,
         currency: def.currency,
       };
     };

@@ -304,6 +304,26 @@ export function stageIndexFor(totalMassEver: Num): number {
   return 0;
 }
 
+/**
+ * How much more a rebased upgrade costs at this stage than at the bottom of the ladder.
+ *
+ * Taken from the ladder's own thresholds rather than from a constant. An upgrade that resets
+ * every promotion has to be repriced every promotion too, or the reset is theatre: at
+ * Supergiant, two hundred levels from a base of 30 mass is free. Tying the price to the
+ * threshold means moving a threshold moves the pricing with it, instead of silently changing
+ * how many levels a stage is worth buying.
+ *
+ * Tracking wealth exactly (this ratio, not some power of it) is the point: a rebased upgrade
+ * should be worth about the same number of levels at every stage, so its contribution stops
+ * compounding across the run. What it gives up is paid back by the promotion multiplier.
+ */
+export function costScaleAt(index: number): Num {
+  const anchor = ACCRETION_STAGES[1]?.threshold;
+  const here = ACCRETION_STAGES[Math.max(0, Math.min(ACCRETION_STAGES.length - 1, index))]?.threshold;
+  if (!anchor || !here || here.lte(anchor)) return D(1);
+  return here.div(anchor);
+}
+
 export interface StageProgress {
   index: number;
   stage: Stage;

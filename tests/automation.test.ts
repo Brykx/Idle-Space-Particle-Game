@@ -10,16 +10,29 @@ import {
   tick,
 } from '../src/sim/economy';
 import { ACHIEVEMENTS, multiplierFor } from '../src/sim/achievements';
+import { stageIndexFor } from '../src/sim/stages';
 import { applyOffline } from '../src/sim/offline';
 import { deserialize, serialize } from '../src/sim/save';
 import { UPGRADES, UPGRADE_IDS, costAt } from '../src/sim/upgrades';
 
 const NOW = 1_700_000_000_000;
 
+/**
+ * A state with every auto-buyer unlocked and switched on.
+ *
+ * Rebased upgrades are left at level 0, because that is the only thing they can be just
+ * after a promotion, and every caller here sets a lifetime mass well up the ladder. Arming
+ * Density at level 25 at the Planet stage produced a state the game cannot reach, and priced
+ * its next level so far out of range that it looked like the auto-buyer was broken.
+ *
+ * `levelsEver` still carries the investment, which is what the unlock reads.
+ */
 function armed(levels: Partial<Record<(typeof UPGRADE_IDS)[number], number>> = {}): GameState {
   const s = initialState(NOW);
   for (const id of UPGRADE_IDS) {
-    s.levels[id] = levels[id] ?? AUTO_BUY_LEVEL;
+    const level = levels[id] ?? AUTO_BUY_LEVEL;
+    s.levels[id] = UPGRADES[id].rebased ? 0 : level;
+    s.levelsEver[id] = level;
     s.autoBuy[id] = true;
   }
   return s;
@@ -36,6 +49,7 @@ describe('auto-buyers', () => {
     expect(runAutoBuyers(s)).toBe(0);
 
     s.levels.gravity = AUTO_BUY_LEVEL;
+    s.levelsEver.gravity = AUTO_BUY_LEVEL;
     expect(autoBuyUnlocked(s, 'gravity')).toBe(true);
     expect(runAutoBuyers(s)).toBeGreaterThan(0);
   });
@@ -50,22 +64,47 @@ describe('auto-buyers', () => {
     expect(s.levels.gravity).toBe(AUTO_BUY_LEVEL);
   });
 
-  it('spends until nothing enabled is affordable, spreading across upgrades', () => {
+  it('spends until nothing enabled is affordable', () => {
     const s = armed();
     s.mass = D('1e9');
     s.totalMassEver = D('1e9');
+    s.rebasedStage = stageIndexFor(s.totalMassEver);
     runAutoBuyers(s);
 
     // The invariant: it stops only when it cannot buy. An upgrade may be untouched simply
     // because it is far too expensive — Accretion Efficiency costs ~1e17 at this level — so
     // the test is about what is left affordable, not about every upgrade moving.
     for (const id of UPGRADE_IDS) {
-      expect(costAt(UPGRADES[id], s.levels[id]).gt(s.mass), `${id} still affordable`).toBe(true);
+      expect(costAt(UPGRADES[id], s.levels[id], stageIndexFor(s.totalMassEver)).gt(s.mass), `${id} still affordable`).toBe(true);
     }
+  });
 
-    // And buying the cheapest raises its cost, so spending spreads rather than piling in.
-    const moved = UPGRADE_IDS.filter((id) => s.levels[id] > AUTO_BUY_LEVEL);
-    expect(moved.length).toBeGreaterThan(2);
+  /**
+   * The self-balancing claim, tested on a state the game actually produces.
+   *
+   * Buying the cheapest raises its cost, so over a run the costs of everything enabled should
+   * converge into one band and spending should spread across all of it. Asserting that on a
+   * hand-built state does not work and is worth remembering why: setting every upgrade to
+   * level 25 puts Gravity Well at 7e4 and Accretion Efficiency at 2e17, because their growth
+   * rates differ by more than twofold. Cheapest-first then pours the entire budget into the
+   * two cheapest and the test reads as a failure to spread, when what actually failed was the
+   * fixture. Twenty minutes of play produces the state the claim is about.
+   */
+  it('equalises what it is buying, over a run', () => {
+    const s = initialState(NOW);
+    for (const id of UPGRADE_IDS) {
+      s.levelsEver[id] = AUTO_BUY_LEVEL;
+      s.autoBuy[id] = true;
+    }
+    for (let t = 0; t < 1200; t += 0.5) tick(s, 0.5);
+
+    const moved = UPGRADE_IDS.filter((id) => s.levelsEver[id] > AUTO_BUY_LEVEL);
+    expect(moved.length, 'upgrades the auto-buyers actually touched').toBeGreaterThan(3);
+
+    // The costs of everything it bought should sit within about an order of each other.
+    const stage = stageIndexFor(s.totalMassEver);
+    const costs = moved.map((id) => costAt(UPGRADES[id], s.levels[id], stage).log10());
+    expect(Math.max(...costs) - Math.min(...costs), 'spread of next-level costs, in orders').toBeLessThan(1.5);
   });
 
   it('honours the reserve, leaving mass for a manual purchase', () => {

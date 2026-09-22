@@ -1,9 +1,10 @@
 import { D, type Num } from './numbers';
 import { PULSE_COOLDOWN, type GameState } from './state';
 import { ACHIEVEMENTS, multiplierFor } from './achievements';
-import { stageIndexFor } from './stages';
+import { costScaleAt, stageIndexFor } from './stages';
 import { elementAt, elementTierFor, nextRequirement } from './elements';
 import {
+  REBASED_UPGRADE_IDS,
   UPGRADE_LIST,
   UPGRADES,
   costAt,
@@ -30,6 +31,37 @@ const BASE_SPAWN = 4;
  * arrives, so radius and gravity always do something and never break the game.
  */
 const CAPTURE_K = 30;
+
+/**
+ * The share of the growth exponent that climbing the ladder pays, rather than buying.
+ *
+ * Reaching a stage multiplies income. *How much* is not a constant, and this is the whole
+ * lesson of the first attempt: a flat x3 per promotion looks like one number but is not one,
+ * because the ladder's gaps run from 1.18 orders of magnitude early to 2.3 late. The same x3
+ * is therefore worth 0.40 of the exponent at the bottom and 0.21 at the top — too strong
+ * where the game is fragile and too weak where it needs carrying. Measured, x1.8 took eight
+ * and a half hours to Supergiant and x2.2 took ninety minutes. Nothing in between was stable,
+ * because nothing in between was the same number twice.
+ *
+ * So the multiplier is derived from the gap instead of fixed. Each promotion is worth
+ * `10 ^ (share x gap)`, which contributes exactly `share` to the exponent sum wherever it
+ * lands. Late promotions come out larger than early ones, which is both what the maths wants
+ * and what a promotion should feel like.
+ *
+ * Cumulatively that product telescopes into the ladder's own cost scale raised to this power
+ * — the same scale that reprices the rebased upgrades. One idea, used twice: what the ladder
+ * takes away from Density on the cost side, it hands back on the income side.
+ *
+ * The value is what a rebased Density gives up. Density's cost exponent is
+ * ln(1.165)/ln(1.685) = 0.293, and an upgrade that resets every promotion contributes that
+ * inside a stage and nothing at all across the run.
+ */
+export const PROMOTION_SHARE = 0.24;
+
+/** What the ladder alone multiplies income by, at a stage. */
+export function promotionMultiplier(stage: number): number {
+  return costScaleAt(stage).pow(PROMOTION_SHARE).toNumber();
+}
 
 /** Levels of an upgrade before it will buy itself. */
 export const AUTO_BUY_LEVEL = 25;
@@ -63,6 +95,10 @@ export interface Rates {
   reach: number;
   /** 0..1, asymptotic. */
   captureFraction: number;
+  /** Index into the accretion ladder. Prices the rebased upgrades and pays the promotion. */
+  stage: number;
+  /** What the ladder alone is currently multiplying income by. */
+  promotionMultiplier: number;
   spawnRate: number;
   massPerParticle: Num;
   globalMultiplier: number;
@@ -89,7 +125,13 @@ export function deriveRates(s: GameState): Rates {
   const radius = BASE_RADIUS + 4 * s.levels.radius;
   const spawnRate = BASE_SPAWN * Math.pow(1.165, s.levels.density);
   const massPerParticle = D(1.34).pow(s.levels.particleMass);
-  const globalMultiplier = Math.pow(1.34, s.levels.efficiency) * multiplierFor(s.achievements.length);
+
+  // Climbing the ladder pays. Everything else here is something you bought.
+  const stage = stageIndexFor(s.totalMassEver);
+  const ladderMultiplier = promotionMultiplier(stage);
+
+  const globalMultiplier =
+    Math.pow(1.34, s.levels.efficiency) * multiplierFor(s.achievements.length) * ladderMultiplier;
 
   const reach = radius * Math.sqrt(gravity);
   // Guard the far end: once gravity overflows a float the fraction is 1 for all purposes.
@@ -127,6 +169,8 @@ export function deriveRates(s: GameState): Rates {
     radius,
     reach,
     captureFraction,
+    stage,
+    promotionMultiplier: ladderMultiplier,
     spawnRate,
     massPerParticle: massPerParticle.mul(elementMultiplier),
     globalMultiplier,
@@ -168,9 +212,14 @@ function spend(s: GameState, def: UpgradeDef, amount: Num): void {
   else s.mass = s.mass.sub(amount);
 }
 
-/** An upgrade buys itself only once you have invested in it by hand. */
+/**
+ * An upgrade buys itself only once you have invested in it by hand.
+ *
+ * Measured against levels *ever* bought, not the current level, so a rebased upgrade does not
+ * hand back its auto-buyer at every promotion.
+ */
 export function autoBuyUnlocked(s: GameState, id: UpgradeId): boolean {
-  return s.levels[id] >= AUTO_BUY_LEVEL;
+  return s.levelsEver[id] >= AUTO_BUY_LEVEL;
 }
 
 export function autoBuyersAvailable(s: GameState): number {
@@ -194,6 +243,7 @@ export function autoBuyersOn(s: GameState): number {
  */
 export function runAutoBuyers(s: GameState): number {
   const spendFraction = 1 - s.settings.autoBuyReserve;
+  const stage = stageIndexFor(s.totalMassEver);
   let bought = 0;
 
   // Per currency: "cheapest" only means something between prices in the same units.
@@ -208,7 +258,7 @@ export function runAutoBuyers(s: GameState): number {
         if (!autoBuyUnlocked(s, def.id)) continue;
         if (!isUnlocked(s, def)) continue;
 
-        const cost = costAt(def, s.levels[def.id]);
+        const cost = costAt(def, s.levels[def.id], stage);
         // Recomputed each pass: the budget shrinks as the loop spends.
         if (cost.gt(walletFor(s, def).mul(spendFraction))) continue;
         if (!cheapest || cost.lt(cheapest)) {
@@ -255,6 +305,25 @@ export function awardAchievements(s: GameState, captureFraction: number): string
  * row and the game loop owns exactly one state object. `deriveRates` stays pure, which is
  * where purity actually buys something.
  */
+/**
+ * Reset the rebased upgrades if a promotion has happened since the last check.
+ *
+ * Here rather than in `deriveRates` because it is a mutation and `deriveRates` is pure. It
+ * runs inside `tick`, so an absence is promoted exactly as presence would be, and it is
+ * written as a catch-up loop rather than a single step because one coarse offline tick can
+ * cross several stages at once.
+ *
+ * `rebasedStage` is not a cache of `stageIndexFor` — it is a record of what was done to the
+ * levels, which is why it is stored rather than derived.
+ */
+function applyPromotions(s: GameState): boolean {
+  const stage = stageIndexFor(s.totalMassEver);
+  if (stage <= s.rebasedStage) return false;
+  s.rebasedStage = stage;
+  for (const id of REBASED_UPGRADE_IDS) s.levels[id] = 0;
+  return true;
+}
+
 export function tick(s: GameState, dt: number): void {
   if (!(dt > 0)) return;
 
@@ -262,6 +331,10 @@ export function tick(s: GameState, dt: number): void {
   earn(s, rates.massPerSecond.mul(dt));
   earnEnergy(s, rates.energyPerSecond.mul(dt));
   s.playTime += dt;
+
+  // Before the auto-buyers spend: a promotion reprices what they are about to buy, and
+  // buying at the old price and then zeroing the level would burn the purchase.
+  applyPromotions(s);
 
   // Both of these live inside the tick so that offline catch-up gets them for free: an
   // absence buys upgrades and unlocks achievements exactly as being present would.
@@ -301,7 +374,7 @@ export function levelOf(s: GameState, id: UpgradeId): number {
 }
 
 export function nextCost(s: GameState, id: UpgradeId): Num {
-  return costAt(UPGRADES[id], s.levels[id]);
+  return costAt(UPGRADES[id], s.levels[id], stageIndexFor(s.totalMassEver));
 }
 
 export function canAfford(s: GameState, id: UpgradeId): boolean {
@@ -318,15 +391,17 @@ export function buy(s: GameState, id: UpgradeId, count: number | 'max' = 1): num
 
   const level = s.levels[id];
   const wallet = walletFor(s, def);
+  const stage = stageIndexFor(s.totalMassEver);
   const purchase =
     count === 'max'
-      ? maxAffordable(def, level, wallet)
-      : { levels: count, cost: costOfLevels(def, level, count) };
+      ? maxAffordable(def, level, wallet, stage)
+      : { levels: count, cost: costOfLevels(def, level, count, stage) };
 
   if (purchase.levels <= 0 || purchase.cost.gt(wallet)) return 0;
 
   spend(s, def, purchase.cost);
   s.levels[id] = level + purchase.levels;
+  s.levelsEver[id] += purchase.levels;
   s.stats.purchases += purchase.levels;
   return purchase.levels;
 }

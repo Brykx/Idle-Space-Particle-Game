@@ -113,8 +113,8 @@ describe('offline', () => {
 describe('purchasing', () => {
   it('charges exactly the geometric sum', () => {
     const def = UPGRADES.gravity;
-    const oneByOne = [0, 1, 2, 3, 4].reduce((sum, level) => sum.add(costAt(def, level)), D(0));
-    expect(costOfLevels(def, 0, 5).toNumber()).toBeCloseTo(oneByOne.toNumber(), 6);
+    const oneByOne = [0, 1, 2, 3, 4].reduce((sum, level) => sum.add(costAt(def, level, 0)), D(0));
+    expect(costOfLevels(def, 0, 5, 0).toNumber()).toBeCloseTo(oneByOne.toNumber(), 6);
   });
 
   it('never lets buy-max overdraw, and never leaves a level on the table', () => {
@@ -122,10 +122,10 @@ describe('purchasing', () => {
     for (const budget of ['0', '24', '25', '1e3', '1e6', '1.234e12', '1e40']) {
       for (const level of [0, 7, 93]) {
         const money = D(budget);
-        const { levels, cost } = maxAffordable(def, level, money);
+        const { levels, cost } = maxAffordable(def, level, money, 0);
         expect(cost.lte(money)).toBe(true);
-        if (levels > 0) expect(costOfLevels(def, level, levels).lte(money)).toBe(true);
-        expect(costOfLevels(def, level, levels + 1).gt(money)).toBe(true);
+        if (levels > 0) expect(costOfLevels(def, level, levels, 0).lte(money)).toBe(true);
+        expect(costOfLevels(def, level, levels + 1, 0).gt(money)).toBe(true);
       }
     }
   });

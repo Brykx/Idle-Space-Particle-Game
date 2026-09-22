@@ -100,6 +100,8 @@
       <p class="goal">
         {#if view.nextStageName}
           next: {view.nextStageName} at {view.nextStageThreshold}
+          <!-- What the climb is worth, stated before you make it. -->
+          {#if view.nextPromotion}<span class="pays">pays {view.nextPromotion}</span>{/if}
         {:else}
           As heavy as accretion alone can make you
         {/if}
@@ -402,6 +404,15 @@
     height: 100%;
     background: linear-gradient(90deg, var(--accent), var(--warm));
     transition: width 220ms ease;
+  }
+
+  .pays {
+    margin-left: 0.4rem;
+    padding: 0 0.3rem;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    opacity: 0.8;
   }
 
   .goal {

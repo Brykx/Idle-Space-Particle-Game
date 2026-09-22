@@ -327,6 +327,35 @@ test.describe('the game runs', () => {
     expect(await page.locator('.mass').innerText()).not.toBe('');
     void massBefore;
   });
+  test('shows what the ladder pays, and warns which card it will empty', async ({ page }) => {
+    // The promotion multiplier is real whether or not it is visible, and an invisible one is
+    // the exact problem it was built to fix. So both halves are asserted: what climbing pays,
+    // and that the card it takes from says so before it happens.
+    await seedSave(page, {
+      mass: '4e9',
+      totalMassEver: '4e9',
+      levels: { density: 6 },
+      levelsEver: { density: 90 },
+      rebasedStage: 6,
+      stageSeen: 6,
+    });
+    await page.reload();
+    await expect(page.locator('.stage-name')).toHaveText('Planet');
+
+    // What the next promotion is worth, stated before you make it.
+    await expect(page.locator('.goal .pays')).toHaveText(/x[\d.]+/);
+
+    // The card that resets says so.
+    const density = page.locator('.upgrades .card', { hasText: 'Particle Density' });
+    await expect(density.locator('.rebased')).toHaveText('resets');
+
+    // And the breakdown attributes the ladder's share to the ladder, rather than hiding it
+    // inside a line labelled "efficiency".
+    const ladder = page.locator('.breakdown li.ladder');
+    await expect(ladder.locator('.label')).toHaveText('the ladder');
+    await expect(ladder.locator('.value')).toHaveText(/x[\d.]+/);
+  });
+
   // Every body kind the ladder can reach by mass. The last two stages, the neutron star and
   // the black hole, carry no threshold — they arrive with the supernova in Phase 3 — so they
   // are covered by `bodies.html` instead, which mounts the field on its own.

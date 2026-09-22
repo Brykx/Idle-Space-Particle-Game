@@ -21,6 +21,13 @@
 <article class="card" class:ready={upgrade.affordable}>
   <header>
     <h3>{upgrade.name}</h3>
+    <!-- Said on the card, not buried in a patch note. A card that empties itself at every
+         promotion has to warn you before it does it, or it reads as a bug. -->
+    {#if upgrade.rebased}
+      <span class="rebased" title="Resets to Lv 0 at every promotion, and its price rebases to the new stage. The ladder pays you back for it.">
+        resets
+      </span>
+    {/if}
     <span class="level num">Lv {upgrade.level}</span>
   </header>
 
@@ -84,6 +91,16 @@
 </article>
 
 <style>
+  .rebased {
+    color: var(--accent, #9fc6ff);
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    padding: 0 0.35rem;
+    font-size: 0.62rem;
+    opacity: 0.75;
+    white-space: nowrap;
+  }
+
   .card {
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -102,6 +119,11 @@
     align-items: baseline;
     justify-content: space-between;
     gap: 0.5rem;
+  }
+
+  /* Pushes the level to the far right, so the badge sits with the name it describes. */
+  header h3 {
+    margin-right: auto;
   }
 
   h3 {

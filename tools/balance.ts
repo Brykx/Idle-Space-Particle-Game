@@ -40,7 +40,15 @@ export interface Feel {
   purchases: number;
   /** Median seconds for income to double. Under ~2 min the number visibly climbs. */
   doublingTime: number;
-  /** Median income increase from one purchase, as a fraction. Under ~1% feels like nothing. */
+  /**
+   * Median income increase from one purchase, as a fraction. Under ~1% feels like nothing.
+   *
+   * Only a floor is asserted. There used to be an upper bound of 15% on the reasoning that
+   * enormous purchases mean too few of them, but purchase count is measured separately and
+   * says that directly. Since the payback ceiling went in, every decision the bot makes is
+   * one worth making, and the median sits at one Particle Density level — 16.5%. Failing the
+   * run for that would be penalising the thing the tuning was trying to achieve.
+   */
   gainPerPurchase: number;
   /** Longest stretch with nothing affordable. */
   worstGap: number;
@@ -98,6 +106,27 @@ function paybackSeconds(s: GameState, id: UpgradeId): number {
 const BUY_ON_SIGHT = new Set(['energy', 'requirement']);
 
 /**
+ * Payback beyond which the bot stops buying something. An hour of current income.
+ *
+ * Capture saturates towards 1 without ever reaching it, so Gravity Well and Capture Radius
+ * keep a positive gain forever — vanishingly small, but never zero, and therefore never
+ * `Infinity` payback. Without a ceiling the bot sinks over half its decisions into them at a
+ * measured 0.0% income gain each, because once everything else is expensive they are still
+ * technically the best finite score.
+ *
+ * No player does that. The per-upgrade toggles exist precisely so a human can stop buying a
+ * card reading "+0.0% income", and a bot with no such rule is not modelling a player, it is
+ * modelling someone who cannot read their own screen.
+ *
+ * This was added after a measurement came back worse than expected, which is the moment to
+ * be most suspicious of changing the instrument. The defence is that the rule is stated in
+ * the player's terms rather than tuned to a target: an upgrade that will not repay itself
+ * within an hour of playing is one you buy something else instead of. The consequences were
+ * then re-measured rather than assumed — see the numbers in `docs/game-design.md`.
+ */
+const MAX_PAYBACK_SECONDS = 3600;
+
+/**
  * Spend down to nothing worth buying, under the given policy.
  *
  * Buys *max* of the chosen upgrade, because that is the button real players press. Returns
@@ -130,6 +159,7 @@ function spend(s: GameState, policy: Policy): number {
 
     const best = scored[0];
     if (!best || !Number.isFinite(best.score)) return decisions;
+    if (policy === 'payback' && best.score > MAX_PAYBACK_SECONDS) return decisions;
     if (buy(s, best.id, 'max') === 0) return decisions;
     decisions += 1;
   }
@@ -276,7 +306,7 @@ function main(): void {
   console.log(
     `\n  first hour: ${purchases} purchases` +
       `   income doubles every ${doublingTime.toFixed(0)}s   (target 45-150s)` +
-      `\n              +${(gainPerPurchase * 100).toFixed(1)}% per purchase   (target 1-15%)` +
+      `\n              +${(gainPerPurchase * 100).toFixed(1)}% per purchase   (target: over 1%)` +
       `   longest wait ${formatDuration(worstGap)}`,
   );
 

@@ -1,7 +1,7 @@
 import { D, type Notation, type Num } from './numbers';
 import { UPGRADE_IDS, type UpgradeId } from './upgrades';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export interface Settings {
   notation: Notation;
@@ -34,12 +34,30 @@ export interface GameState {
   energy: Num;
   totalEnergyEver: Num;
   levels: Record<UpgradeId, number>;
+  /**
+   * Levels ever bought, per upgrade. Never decreases, not even at a promotion.
+   *
+   * `levels` is what the economy reads; this is what *investment* reads. They were the same
+   * number until Density started resetting, at which point deriving the auto-buy unlock from
+   * the current level began confiscating an auto-buyer the player had already earned, once
+   * per promotion. Splitting them keeps one rule for every upgrade instead of an exception
+   * for the rebased ones.
+   */
+  levelsEver: Record<UpgradeId, number>;
   /** Seconds of simulated time. The sim's only clock — no wall clock in here. */
   playTime: number;
   /** `playTime` at which Gravity Pulse becomes available again. */
   pulseReadyAt: number;
   /** Highest stage the player has been told about, so each one announces itself once. */
   stageSeen: number;
+  /**
+   * The ladder stage the rebased upgrade levels belong to.
+   *
+   * Distinct from `stageSeen`, which is a UI acknowledgement. This one is a simulation fact:
+   * it records that the reset has already happened for that stage, so a promotion cannot be
+   * applied twice and cannot be missed across a reload.
+   */
+  rebasedStage: number;
   /** Which upgrades buy themselves. Unlocking is derived from level, so it is not stored. */
   autoBuy: Record<UpgradeId, boolean>;
   /** Ids of unlocked achievements. */
@@ -54,9 +72,11 @@ export const PULSE_COOLDOWN = 10;
 
 export function initialState(now = Date.now()): GameState {
   const levels = {} as Record<UpgradeId, number>;
+  const levelsEver = {} as Record<UpgradeId, number>;
   const autoBuy = {} as Record<UpgradeId, boolean>;
   for (const id of UPGRADE_IDS) {
     levels[id] = 0;
+    levelsEver[id] = 0;
     autoBuy[id] = false;
   }
 
@@ -67,9 +87,11 @@ export function initialState(now = Date.now()): GameState {
     energy: D(0),
     totalEnergyEver: D(0),
     levels,
+    levelsEver,
     playTime: 0,
     pulseReadyAt: 0,
     stageSeen: 0,
+    rebasedStage: 0,
     autoBuy,
     achievements: [],
     lastSeen: now,
