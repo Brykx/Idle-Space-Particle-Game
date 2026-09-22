@@ -28,6 +28,16 @@ export interface FieldRates {
   coreColour: number;
   /** Packed RGB for the particles falling in, from the current stage. */
   particleColour: number;
+  /** Sprite size multiplier, from the current stage. */
+  particleSize: number;
+  /** Multiplier on emission. Falls as size rises, so the lit area stays in a band. */
+  particleCount: number;
+  /** Tangential speed of a capture trajectory, as a fraction of orbital speed. */
+  orbit: [number, number];
+  /** Per-second damping on capture trajectories. */
+  drag: number;
+  /** Seconds before an unabsorbed particle gives up. */
+  lifetime: number;
   /** Maximum live particles. */
   budget: number;
   reducedMotion: boolean;
@@ -192,6 +202,11 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     coreScale: 0.02,
     coreColour: INITIAL_CORE,
     particleColour: INITIAL_PARTICLE,
+    particleSize: 0.3,
+    particleCount: 8,
+    orbit: [0.6, 0.9],
+    drag: 0.06,
+    lifetime: 26,
     budget: 1200,
     reducedMotion: false,
   };
@@ -201,6 +216,10 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     scale: rates.coreScale,
     core: unpack(INITIAL_CORE),
     particle: unpack(INITIAL_PARTICLE),
+    // Size and count ease too, so a promotion is a field that thins and coarsens over a
+    // couple of seconds rather than a cut.
+    particleSize: rates.particleSize,
+    particleCount: rates.particleCount,
   };
 
   const geo: FieldGeometry = { centreX: 0, centreY: 0, spawnRadius: 400, coreRadius: CORE_MIN_RADIUS };
@@ -288,15 +307,27 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     // Ease everything the stage controls, rather than snapping to it.
     const k = 1 - Math.exp(-MORPH_RATE * dt);
     shown.scale += (rates.coreScale - shown.scale) * k;
+    shown.particleSize += (rates.particleSize - shown.particleSize) * k;
+    shown.particleCount += (rates.particleCount - shown.particleCount) * k;
     easeColour(shown.core, rates.coreColour, k);
     easeColour(shown.particle, rates.particleColour, k);
+
+    // Trajectory and lifetime come from the stage. They apply at spawn, so they do not need
+    // easing — new particles simply start behaving like the stage you are now in.
+    tuning.captureTangential = rates.orbit;
+    tuning.captureDrag = rates.drag;
+    tuning.lifetime = rates.lifetime;
 
     const particleTint = pack(shown.particle);
     const coreTint = pack(shown.core);
 
+    // The stage's count multiplier lands *inside* the clamp, so a dust field is allowed to
+    // ask for far more than the pool can hold — it saturates the budget, which is the point.
     const emission =
-      Math.min(MAX_VISUAL_SPAWN, Math.max(MIN_VISUAL_SPAWN, rates.spawnRate)) *
-      (rates.reducedMotion ? 0.4 : 1);
+      Math.min(
+        MAX_VISUAL_SPAWN,
+        Math.max(MIN_VISUAL_SPAWN, rates.spawnRate) * shown.particleCount,
+      ) * (rates.reducedMotion ? 0.4 : 1);
 
     // A trail is motion, so reduced motion takes it to nothing — one factor, not a branch.
     const trail = rates.reducedMotion ? 0 : 1;
@@ -324,7 +355,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       sprite.y = pool.y[i] as number;
       sprite.tint = particleTint;
 
-      const s = (pool.size[i] as number) * 0.07;
+      const s = (pool.size[i] as number) * 0.07 * shown.particleSize;
       const alpha = pool.alpha[i] as number;
 
       if (trail === 0) {
