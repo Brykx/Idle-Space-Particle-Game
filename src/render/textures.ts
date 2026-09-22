@@ -336,33 +336,41 @@ export interface SceneTextures {
  * container's batching the moment a stage used the other one.
  */
 function makeParticleAtlas(): { soft: Texture; hard: Texture; glow: Texture } {
-  const made = canvas2d(256);
+  // 256px cells rather than 128. At the top of the ladder a single infalling body is drawn
+  // tens of pixels across, and half that resolution was being magnified into a smear at
+  // exactly the stages where the particles are meant to read as objects.
+  const cell = 256;
+  const made = canvas2d(cell * 2);
   if (!made) return { soft: Texture.WHITE, hard: Texture.WHITE, glow: Texture.WHITE };
   const { canvas, ctx } = made;
+  const r = cell / 2;
 
-  const soft = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  const soft = ctx.createRadialGradient(r, r, 0, r, r, r);
   soft.addColorStop(0, 'rgba(255,255,255,1)');
   soft.addColorStop(0.25, 'rgba(255,255,255,0.7)');
   soft.addColorStop(0.6, 'rgba(255,255,255,0.16)');
   soft.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = soft;
-  ctx.fillRect(0, 0, 128, 128);
+  ctx.fillRect(0, 0, cell, cell);
 
-  // The hard variant: a defined grain with a small halo, so rock reads as grit not fog.
-  const hard = ctx.createRadialGradient(192, 64, 0, 192, 64, 64);
+  // The hard variant: a solid body with a tight halo, so a captured rock reads as a rock
+  // rather than as a bright patch of fog. The falloff is short on purpose — a long one is
+  // what made the late ladder look washed.
+  const hard = ctx.createRadialGradient(cell + r, r, 0, cell + r, r, r);
   hard.addColorStop(0, 'rgba(255,255,255,1)');
-  hard.addColorStop(0.28, 'rgba(255,255,255,1)');
-  hard.addColorStop(0.36, 'rgba(255,255,255,0.55)');
-  hard.addColorStop(0.55, 'rgba(255,255,255,0.10)');
+  hard.addColorStop(0.34, 'rgba(255,255,255,1)');
+  hard.addColorStop(0.40, 'rgba(255,255,255,0.72)');
+  hard.addColorStop(0.48, 'rgba(255,255,255,0.26)');
+  hard.addColorStop(0.66, 'rgba(255,255,255,0.06)');
   hard.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = hard;
-  ctx.fillRect(128, 0, 128, 128);
+  ctx.fillRect(cell, 0, cell, cell);
 
   const source = Texture.from(canvas).source;
   return {
-    soft: new Texture({ source, frame: new Rectangle(0, 0, 128, 128) }),
-    hard: new Texture({ source, frame: new Rectangle(128, 0, 128, 128) }),
-    glow: new Texture({ source, frame: new Rectangle(0, 0, 128, 128) }),
+    soft: new Texture({ source, frame: new Rectangle(0, 0, cell, cell) }),
+    hard: new Texture({ source, frame: new Rectangle(cell, 0, cell, cell) }),
+    glow: new Texture({ source, frame: new Rectangle(0, 0, cell, cell) }),
   };
 }
 

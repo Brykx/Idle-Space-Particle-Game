@@ -6,7 +6,7 @@ import {
   ParticleContainer,
   Sprite,
 } from 'pixi.js';
-import { createGasGiant, type Impostor } from './impostor';
+import { createBodies, type Bodies, type BodyState } from './impostor';
 import { DEFAULT_TUNING, ParticlePool, type FieldGeometry } from './pool';
 import { LUMINOUS, makeSceneTextures } from './textures';
 import type { BodyKind } from '../sim/stages';
@@ -184,13 +184,13 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   corePrevious.blendMode = 'add';
   corePrevious.alpha = 0;
 
-  // The gas giant is drawn by a shader rather than a texture. If this renderer cannot run
-  // GLSL it stays null and the field falls back to the canvas body, which still works.
-  const impostor: Impostor | null = createGasGiant(app.renderer);
-  const impostorKinds: ReadonlySet<BodyKind> = impostor ? new Set<BodyKind>(['gas']) : new Set();
+  // Every stage is drawn by a shader when the renderer can run GLSL. If it cannot, this
+  // stays null and the two core sprites above carry the body from `textures.ts` instead —
+  // the same field, drawn less well, rather than no field at all.
+  const bodies: Bodies | null = createBodies(app.renderer);
 
   app.stage.addChild(stars, field, halo, corePrevious, core);
-  if (impostor) app.stage.addChild(impostor.view);
+  if (bodies) app.stage.addChild(bodies.view);
   app.stage.addChild(effects);
 
   // --- state -------------------------------------------------------------------------
@@ -261,7 +261,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
         anchorY: 0.5,
         alpha: 0,
       });
-      p.scaleX = p.scaleY = 0.08;
+      p.scaleX = p.scaleY = 0.04;
       sprites.push(p);
       field.addParticle(p);
     }
@@ -281,7 +281,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
         anchorY: 0.5,
         alpha: 0.06 + Math.random() * 0.2,
       });
-      p.scaleX = p.scaleY = 0.012 + Math.random() * 0.03;
+      p.scaleX = p.scaleY = 0.006 + Math.random() * 0.015;
       p.tint = 0xcfe2ff;
       stars.addParticle(p);
     }
@@ -298,7 +298,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     halo.position.set(geo.centreX, geo.centreY);
     core.position.set(geo.centreX, geo.centreY);
     corePrevious.position.set(geo.centreX, geo.centreY);
-    impostor?.view.position.set(geo.centreX, geo.centreY);
+    bodies?.view.position.set(geo.centreX, geo.centreY);
   }
 
   rebuildPool(rates.budget);
@@ -373,7 +373,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       sprite.y = pool.y[i] as number;
       sprite.tint = particleTint;
 
-      const s = (pool.size[i] as number) * 0.07 * shown.particleSize;
+      const s = (pool.size[i] as number) * 0.035 * shown.particleSize;
       const alpha = pool.alpha[i] as number;
 
       if (trail === 0) {
@@ -387,7 +387,13 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       const vx = pool.vx[i] as number;
       const vy = pool.vy[i] as number;
       const speed = Math.hypot(vx, vy);
-      const stretch = 1 + Math.min(TRAIL_MAX_STRETCH, (speed / TRAIL_SPEED_REF) * trail);
+      // A streak is a distance, not a multiple of the body. At the same speed a dust mote
+      // smears across many times its own width while a captured moon barely elongates, so
+      // the stretch is divided by how large the stage draws its particles. Without this the
+      // late ladder is full of enormous lozenges, which is the opposite of heavy.
+      const stretchScale = 1 / Math.max(0.55, shown.particleSize);
+      const stretch =
+        1 + Math.min(TRAIL_MAX_STRETCH, (speed / TRAIL_SPEED_REF) * trail * stretchScale);
 
       sprite.rotation = Math.atan2(vy, vx);
       sprite.scaleX = s * stretch;
@@ -398,18 +404,22 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       sprite.alpha = alpha / Math.sqrt(stretch);
     }
 
-    // A change of body starts a crossfade: the old sprite keeps what it had and fades.
+    // A change of body starts a crossfade. The sprite path also swaps textures here, since
+    // the blend mode itself changes between solid and luminous kinds and cannot be eased.
     if (rates.body !== shownBody) {
-      corePrevious.texture = core.texture;
-      corePrevious.blendMode = core.blendMode;
-      corePrevious.tint = core.tint;
-      core.texture = textures.body[rates.body];
-      core.blendMode = LUMINOUS.has(rates.body) ? 'add' : 'normal';
+      if (!bodies) {
+        corePrevious.texture = core.texture;
+        corePrevious.blendMode = core.blendMode;
+        corePrevious.tint = core.tint;
+        core.texture = textures.body[rates.body];
+        core.blendMode = LUMINOUS.has(rates.body) ? 'add' : 'normal';
+      }
       previousBody = shownBody;
       shownBody = rates.body;
       bodyBlend = 0;
     }
-    bodyBlend = Math.min(1, bodyBlend + dt * 0.9);
+    // Slow: a promotion is something you watch happen, not a palette swap.
+    bodyBlend = Math.min(1, bodyBlend + dt * 0.55);
 
     const wantHard = !LUMINOUS.has(rates.body);
     if (wantHard !== particlesAreHard) {
@@ -423,46 +433,48 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     // Core: sized by progress, brightened by what it just ate, with a slow idle breath.
     const breath = rates.reducedMotion ? 0 : Math.sin(time * 1.1) * 0.025;
     const coreScale = (geo.coreRadius / 64) * (1 + breath + flash * 0.18);
-    core.scale.set(coreScale);
-    corePrevious.scale.set(coreScale);
 
-    // Solid bodies keep their own colour. Washing a quarter of white through everything is
-    // what made rock look like fog; only a luminous body should be near-white at rest.
-    core.tint = luminous
-      ? mixColour(coreTint, 0xffffff, 0.3 + flash * 0.4)
-      : mixColour(coreTint, 0xffffff, flash * 0.35);
+    if (bodies) {
+      // The sprite bodies fill 94% of a 256px texture, so their drawn radius is 120 * scale.
+      // The shader bodies inherit that number so the ladder keeps one sense of size.
+      const radius = coreScale * 120;
+      const body: Omit<BodyState, 'alpha'> = {
+        radius,
+        tint: coreTint,
+        flash,
+        time: rates.reducedMotion ? 0 : time,
+      };
 
-    // A shader body and a sprite body occupy the same slot, so exactly one of them carries
-    // each side of a crossfade and the other is held at zero.
-    const enteringMesh = impostorKinds.has(shownBody);
-    const leavingMesh = impostorKinds.has(previousBody);
-
-    core.alpha = enteringMesh ? 0 : luminous ? 0.85 + flash * 0.15 : bodyBlend;
-    corePrevious.alpha = leavingMesh ? 0 : 1 - bodyBlend;
-
-    if (impostor) {
-      // Once the fade out has finished the mesh has nothing left to say, so stop drawing it
-      // — otherwise a single visit to the gas giant leaves a transparent quad in every
-      // subsequent frame for the rest of the run.
-      impostor.view.visible = enteringMesh || (leavingMesh && bodyBlend < 1);
-      if (impostor.view.visible) {
-        impostor.update(rates.reducedMotion ? 0 : time, {
-          // The sprite bodies fill 94% of a 256px texture, so their drawn radius is
-          // 120 * scale. Matching it keeps a promotion into the gas giant the same size as
-          // the body it replaced, rather than a sudden shrink.
-          radius: coreScale * 120,
-          tint: coreTint,
-          alpha: enteringMesh ? bodyBlend : 1 - bodyBlend,
-          flash,
-        });
+      // Both sides of a promotion are on screen together while it happens, with the new one
+      // in front so the old one dissolves out from under it.
+      bodies.begin();
+      if (previousBody !== shownBody && bodyBlend < 1) {
+        bodies.show(previousBody, { ...body, alpha: 1 - bodyBlend }, 0);
       }
+      bodies.show(shownBody, { ...body, alpha: bodyBlend }, 1);
+      bodies.end();
+
+      core.alpha = 0;
+      corePrevious.alpha = 0;
+    } else {
+      core.scale.set(coreScale);
+      corePrevious.scale.set(coreScale);
+
+      // Solid bodies keep their own colour. Washing a quarter of white through everything is
+      // what made rock look like fog; only a luminous body should be near-white at rest.
+      core.tint = luminous
+        ? mixColour(coreTint, 0xffffff, 0.3 + flash * 0.4)
+        : mixColour(coreTint, 0xffffff, flash * 0.35);
+      core.alpha = luminous ? 0.85 + flash * 0.15 : bodyBlend;
+      corePrevious.alpha = 1 - bodyBlend;
     }
 
     // The halo is light, so it belongs to bodies that emit it. A rock gets a hint of dust.
-    halo.scale.set(coreScale * (luminous ? 3.4 : 2.2));
-    halo.alpha = luminous
-      ? 0.16 + flash * 0.2 + shown.scale * 0.12
-      : 0.05 + flash * 0.12;
+    // The shader bodies draw their own atmosphere and corona, so this is only the far-field
+    // bloom for them, and most of it would be a second glow on top of a better one.
+    const bloom = bodies ? 0.4 : 1;
+    halo.scale.set(coreScale * (luminous ? 1.7 : 1.1));
+    halo.alpha = (luminous ? 0.16 + flash * 0.2 + shown.scale * 0.12 : 0.05 + flash * 0.12) * bloom;
     halo.tint = particleTint;
 
     for (const ring of rings) {

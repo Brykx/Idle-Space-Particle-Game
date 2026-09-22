@@ -84,6 +84,34 @@ function decodePng(png: Buffer): { width: number; height: number; channels: numb
   return { width, height, channels, pixels };
 }
 
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Mean and spread of perceived brightness across a screen patch, both 0..255. */
+async function luminance(page: Page, clip: Box): Promise<{ mean: number; spread: number }> {
+  const shot = decodePng(await page.screenshot({ clip, scale: 'css' }));
+  const pixels = shot.width * shot.height;
+  const values: number[] = [];
+  let total = 0;
+  for (let i = 0; i < pixels; i++) {
+    const at = i * shot.channels;
+    const l =
+      0.2126 * (shot.pixels[at] as number) +
+      0.7152 * (shot.pixels[at + 1] as number) +
+      0.0722 * (shot.pixels[at + 2] as number);
+    values.push(l);
+    total += l;
+  }
+  const mean = total / pixels;
+  let variance = 0;
+  for (const l of values) variance += (l - mean) * (l - mean);
+  return { mean, spread: Math.sqrt(variance / pixels) };
+}
+
 test.describe('the game runs', () => {
   // Playwright gives each test a fresh context, so localStorage starts empty on its own.
   test.beforeEach(async ({ page }) => {
@@ -299,39 +327,66 @@ test.describe('the game runs', () => {
     expect(await page.locator('.mass').innerText()).not.toBe('');
     void massBefore;
   });
-  test('draws the gas giant with its shader, without a compile failure', async ({ page }) => {
-    // A shader that fails to compile does not throw — Pixi warns and the body silently stops
-    // drawing, which no other assertion here would notice. So this watches the console, and
-    // then checks that something is actually on screen where the planet should be.
-    const complaints: string[] = [];
-    page.on('console', (message) => {
-      if (message.type() === 'error' || message.type() === 'warning') complaints.push(message.text());
+  // Every body kind the ladder can reach by mass. The last two stages, the neutron star and
+  // the black hole, carry no threshold — they arrive with the supernova in Phase 3 — so they
+  // are covered by `bodies.html` instead, which mounts the field on its own.
+  const BODIES: Array<[string, string, string]> = [
+    ['mote', '50', 'Dust'],
+    ['rock', '5e3', 'Boulder'],
+    ['world', '1e9', 'Planet'],
+    ['gas', '1e11', 'Gas Giant'],
+    ['ember', '1e13', 'Brown Dwarf'],
+    ['star', '1e18', 'Star'],
+  ];
+
+  for (const [kind, mass, label] of BODIES) {
+    test(`draws the ${kind} body with its shader`, async ({ page }) => {
+      // A shader that fails to compile does not throw: Pixi warns and draws nothing, and the
+      // core sprite is held at zero alpha while the mesh owns that slot. So this watches the
+      // console for the failure, and then checks the screen for its consequence.
+      const complaints: string[] = [];
+      page.on('console', (message) => {
+        if (message.type() === 'error' || message.type() === 'warning') complaints.push(message.text());
+      });
+      page.on('pageerror', (error) => complaints.push(String(error)));
+
+      // No particles and no motion. With the field running, a bright drift of infalling
+      // specks across the middle of the screen is enough on its own to pass a brightness
+      // check, so a body that silently draws nothing would sail through — which is exactly
+      // what this is here to catch. Emptying the pool leaves only the body.
+      await seedSave(page, {
+        mass,
+        totalMassEver: mass,
+        settings: { particleBudget: 0, reducedMotion: true },
+      });
+      await page.reload();
+      await expect(page.locator('.stage-name')).toHaveText(label);
+
+      // Give it real frames: a program is compiled on its first draw, not at construction.
+      await page.waitForTimeout(1500);
+      expect(complaints.filter((text) => /shader|program|glsl|compil/i.test(text))).toEqual([]);
+
+      const box = (await page.locator('canvas').boundingBox()) as Box;
+      const centre = await luminance(page, {
+        x: box.x + box.width / 2 - 20,
+        y: box.y + box.height / 2 - 20,
+        width: 40,
+        height: 40,
+      });
+      const empty = await luminance(page, { x: box.x + 8, y: box.y + 8, width: 40, height: 40 });
+
+      // Brighter than empty space, obviously. But brightness alone is not enough: the halo
+      // sprite behind the core is bright too, and a body that compiled and then drew nothing
+      // hides behind it — measured at 15 against a threshold of 13, which is a test that
+      // passes for the wrong reason. So the patch also has to have *structure*: a
+      // terminator, or craters, or belts, or granules. A glow is smooth; a body is not.
+      //
+      // Measured spread with the bodies working runs from 11 (dust, which really is a smooth
+      // cloud) to 45 (the brown dwarf). With the body drawing nothing it is 1. The bound sits
+      // between those, nearer the floor, so neither a dimmer dust cloud nor a smoother star
+      // turns this red without something actually being wrong.
+      expect(centre.mean).toBeGreaterThan(empty.mean * 2 + 6);
+      expect(centre.spread).toBeGreaterThan(6);
     });
-    page.on('pageerror', (error) => complaints.push(String(error)));
-
-    await seedSave(page, { mass: '1e11', totalMassEver: '1e11' });
-    await page.reload();
-    await expect(page.locator('.stage-name')).toHaveText('Gas Giant');
-
-    // Give it real frames: the program is compiled on the first draw, not at construction.
-    await page.waitForTimeout(1500);
-    expect(complaints.filter((text) => /shader|program|glsl|compil/i.test(text))).toEqual([]);
-
-    const box = (await page.locator('canvas').boundingBox()) as { x: number; y: number; width: number; height: number };
-    const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-    const shot = decodePng(
-      await page.screenshot({ clip: { x: centre.x - 20, y: centre.y - 20, width: 40, height: 40 }, scale: 'css' }),
-    );
-
-    // The lit side of a gas giant is warm and bright; the empty field behind it is neither.
-    // Sampling a patch rather than one pixel keeps a stray particle from deciding the test.
-    let lit = 0;
-    const total = shot.width * shot.height;
-    for (let i = 0; i < total; i++) {
-      const r = shot.pixels[i * shot.channels] as number;
-      const b = shot.pixels[i * shot.channels + 2] as number;
-      if (r > 90 && r > b + 20) lit++;
-    }
-    expect(lit).toBeGreaterThan(total * 0.5);
-  });
+  }
 });

@@ -16,8 +16,9 @@ src/
     save.ts            # serialize, deserialize, MIGRATIONS[]
   render/
     Field.ts           # the only file that imports pixi; init/setRates/pulse/destroy
-    textures.ts        # procedural canvas bodies, one per BodyKind
-    impostor.ts        # sphere-impostor shaders; the gas giant, for now
+    shading.ts         # the GLSL: a shared impostor preamble + one surface per BodyKind
+    impostor.ts        # Pixi plumbing for the shader bodies
+    textures.ts        # procedural canvas bodies — the fallback when WebGL is unavailable
     pool.ts            # pre-allocated particle pool, zero per-frame allocation
     effects.ts         # pulse, ignition, supernova, lensing
   ui/                  # Svelte components; read snapshots, dispatch intents
@@ -169,19 +170,40 @@ different doing it.
   self-lit ember, a hard star, a spiked neutron remnant, and a black hole that is an actual
   opaque hole with a ring. Solid kinds draw with normal blending so they occlude the field and
   can be dark on one side; only luminous kinds keep the additive glow.
-- **Sphere impostors — spiked on the gas giant.** A canvas body is a *picture* of an object:
+- **Sphere impostors — done, all eight kinds.** A canvas body is a *picture* of an object:
   the lighting is baked in at start-up, so the terminator never moves and the detail is
-  whatever 256px could hold. `render/impostor.ts` computes the disc per pixel instead —
-  recovering the sphere normal from the fragment position, then doing the lighting, limb
-  darkening, atmospheric rim and cloud detail in GLSL, with the clouds sampled in body space
-  so they rotate with the planet and compress correctly towards the limb. Still one draw
-  call, still one quad; the difference is that it is an object rather than a sticker.
+  whatever 256px could hold. `render/shading.ts` computes the disc per pixel instead --
+  recovering the sphere normal from the fragment position, then doing the lighting in GLSL,
+  with surface detail sampled in *body* space so it rotates with the object and compresses
+  correctly towards the limb. One quad and one draw call each.
 
-  Only the gas giant is built this way so far, and the field falls back to the canvas body if
-  the renderer is not WebGL. The remaining seven kinds are variations on the same skeleton:
-  swap the surface function and the lighting model, keep the impostor maths. `world` and
-  `ember` are the obvious next two, since both are spheres with an atmosphere; `rock` needs a
-  non-spherical silhouette and `hole` needs lensing, so both are their own problem.
+  What each kind is made of:
+
+  | kind | what the shader does |
+  |---|---|
+  | mote | a density field, no surface at all — the only kind with no edge anywhere |
+  | rock | a displaced silhouette (it is not a sphere), craters and grain as a height field, relief from its gradient |
+  | world | ocean, continents, ice at the poles and on high ground, a specular that only water gets, cloud on its own slower rotation, a scattering rim |
+  | gas | anisotropic cloud noise — belts fall out of the sampling — plus a latitude shear, a storm fixed in body space, wrap lighting for a deep atmosphere |
+  | ember | lit from *inside*: no terminator, brightest where you look straight down into it, with silicate weather drifting across the heat |
+  | star | granulation, the real limb-darkening law, starspots in two activity belts, faculae at the limb, a chromosphere, a fanned corona and prominences |
+  | remnant | a hard point with a photon ring, a plasma torus, and two beams on a magnetic axis tilted off the spin axis |
+  | hole | an opaque shadow, a photon ring, a Doppler-beamed disc seen at a shallow angle, and its far side lensed over the top |
+
+  Three things are worth keeping in mind before touching this:
+
+  - **Shade in body space, not view space.** The light has to make the same trip as the
+    normal, or a turning body's own features are lit from a direction that drifts as it
+    rotates. `toBody` returns a matrix rather than applying one for exactly this reason.
+  - **Rotate every fbm octave.** Value noise is built on an axis-aligned lattice, and octaves
+    that share those axes line up: the lattice planes cut the sphere in the same places at
+    every scale. On the star it came out as a bright Y across the disc.
+  - **Exposure is a feature.** A star is bright enough to clip, and the granules, the spots
+    and the limb all live in the top fifth of the range that clipping throws away.
+
+  `textures.ts` stays as the fallback for a renderer that cannot run GLSL, and `bodies.html`
+  (dev only, not in the build) mounts the field on its own so the last two stages — which
+  carry no mass threshold and arrive with the supernova — can be looked at at all.
 - Field **width** per stage, the one part of field identity still open.
 - Bloom, camera easing, audio layer.
 
