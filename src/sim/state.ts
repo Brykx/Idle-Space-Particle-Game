@@ -1,7 +1,8 @@
 import { D, type Notation, type Num } from './numbers';
 import { UPGRADE_IDS, type UpgradeId } from './upgrades';
+import { STARDUST_IDS, type StardustId } from './prestige';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export interface Settings {
   notation: Notation;
@@ -60,8 +61,17 @@ export interface GameState {
   rebasedStage: number;
   /** Which upgrades buy themselves. Unlocking is derived from level, so it is not stored. */
   autoBuy: Record<UpgradeId, boolean>;
-  /** Ids of unlocked achievements. */
+  /** Ids of unlocked achievements. Survive a collapse; they record what you did. */
   achievements: string[];
+
+  // --- what survives a supernova -------------------------------------------------------
+  /** Unspent Stardust. A Decimal: it goes as mass^0.6, and mass has no ceiling. */
+  stardust: Num;
+  /** Ever earned. Drives achievements and the "how far have you come" readouts. */
+  stardustEver: Num;
+  /** How many supernovae you have set off. */
+  collapses: number;
+  stardustLevels: Record<StardustId, number>;
   /** Wall-clock ms at the last save. The one bridge to real time, used for offline catch-up. */
   lastSeen: number;
   settings: Settings;
@@ -74,6 +84,8 @@ export function initialState(now = Date.now()): GameState {
   const levels = {} as Record<UpgradeId, number>;
   const levelsEver = {} as Record<UpgradeId, number>;
   const autoBuy = {} as Record<UpgradeId, boolean>;
+  const stardustLevels = {} as Record<StardustId, number>;
+  for (const id of STARDUST_IDS) stardustLevels[id] = 0;
   for (const id of UPGRADE_IDS) {
     levels[id] = 0;
     levelsEver[id] = 0;
@@ -94,6 +106,10 @@ export function initialState(now = Date.now()): GameState {
     rebasedStage: 0,
     autoBuy,
     achievements: [],
+    stardust: D(0),
+    stardustEver: D(0),
+    collapses: 0,
+    stardustLevels,
     lastSeen: now,
     settings: {
       notation: 'letters',

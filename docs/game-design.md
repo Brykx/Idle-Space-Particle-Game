@@ -317,10 +317,36 @@ stardust = floor( 12 × (mass / threshold) ^ 0.6 )
 Exponent 0.6 means prestiging later earns more in total but at falling efficiency, so there is
 a real decision every run instead of one correct answer.
 
-Stardust buys a permanent tree — global multiplier, starting mass, spawn rate, offline
-efficiency, faster auto-buyers, cheaper upgrade scaling. You restart as a neutron star in a
-nebula seeded with heavy elements: run 2 reaches Act II in a fraction of the time and *feels*
-different, not just faster.
+Stardust buys a permanent tree of five, and only one of them is a multiplier. The other four
+change the *shape* of a run — how much mass you start with, how far up the element chain you
+begin, what an absence is worth, how soon automation arrives — because a tree of six global
+multipliers is six ways to write the same upgrade, and the second run should feel different
+rather than merely shorter.
+
+| Card | Does | Capped at |
+|---|---|---|
+| Enriched Nebula | x1.15 to all mass | — |
+| Seed Mass | x8 starting mass | — |
+| Prior Ignition | start one element tier higher | 4, the reachable chain |
+| Deep Slumber | +6% offline rate | 5, at parity with being present |
+| Muscle Memory | automate 5 levels sooner | 4 |
+
+Two of those caps are design statements rather than balance knobs. **Deep Slumber** stops at
+the point where an absence matches presence: coarse offline steps under-pay by roughly a
+quarter over twelve hours, so it buys that back and no more. Letting it go further would make
+the strongest play "close the tab", and no upgrade should sell a player that. **Prior
+Ignition** is a floor and not a bonus — once the disk has earned a higher tier on its own it
+adds nothing, so it accelerates the opening rather than raising the ceiling.
+
+Measured: collapsing ten minutes past the top of the ladder reaches Brown Dwarf 3.2x faster
+on the second run. Collapsing the instant you arrive is worth 1.7x; waiting twenty-five
+minutes is worth 16x.
+
+**The timing is the decision, and it is weaker than it looks.** The exponent below 1 means
+waiting earns more in total and less per order of magnitude — but mass is exponential in
+time, so Stardust per minute still rises the longer you wait. What actually bounds a run is
+that the tree's cheap levels run out and the geometric ones stop paying, not the exponent.
+Worth revisiting if a run ever starts feeling like a waiting game.
 
 ### Act IV — Collapse (second prestige)
 Accrete past the TOV limit and the neutron star becomes a black hole. Reset Stardust for

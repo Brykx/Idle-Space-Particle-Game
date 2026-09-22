@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runPacing, type PacingResult, type ShapeSample } from '../tools/balance';
+import { runCollapse, runPacing, type PacingResult, type ShapeSample } from '../tools/balance';
 
 /**
  * Pacing regression. The bounds are deliberately generous: this is not asserting that the
@@ -105,5 +105,43 @@ describe('pacing', () => {
   it('makes a purchase worth making, without burying them in noise', () => {
     expect(run.firstHour.gainPerPurchase).toBeGreaterThan(0.01);
     expect(run.firstHour.purchases).toBeLessThan(600);
+  });
+
+  /**
+   * Phase 3's own bar: run two reaches the Brown Dwarf stage in under a third of run one's
+   * time. Measured after a ten-minute push past the top of the ladder, because collapsing the
+   * instant it tops out is the worst moment available and nobody plays that way — a bot does
+   * it only because nothing told it not to.
+   */
+  it('makes the run after a supernova a different run', () => {
+    const c = runCollapse(10 * MINUTE);
+    expect(c.stardust.toNumber(), 'a first collapse has to be worth something').toBeGreaterThan(20);
+
+    const find = (run: PacingResult[], id: string): number => {
+      const found = run.find((m) => m.id === id);
+      if (!found) throw new Error(`No pacing result for "${id}"`);
+      return found.seconds;
+    };
+
+    const before = find(c.firstRun.milestones, 'brownDwarf');
+    const after = find(c.secondRun.milestones, 'brownDwarf');
+    expect(after).toBeLessThan(before / 3);
+
+    // And the whole ladder, not just the part the tree happens to flatter.
+    expect(find(c.secondRun.milestones, 'supergiant')).toBeLessThan(find(c.firstRun.milestones, 'supergiant'));
+  });
+
+  /**
+   * The timing has to be a decision. If waiting paid the same as collapsing on arrival there
+   * would be nothing to decide; if it paid proportionally there would be nothing to decide
+   * either, just a bigger number later.
+   */
+  it('rewards waiting, at a falling rate per order of magnitude', () => {
+    const early = runCollapse(0).stardust;
+    const late = runCollapse(10 * MINUTE).stardust;
+    expect(late.gt(early)).toBe(true);
+    // Ten minutes near the top is several orders of magnitude of mass; the exponent below 1
+    // is what stops that being several orders of magnitude of Stardust.
+    expect(late.div(early).toNumber()).toBeLessThan(100);
   });
 });

@@ -1,6 +1,7 @@
 import { D } from './numbers';
 import { SAVE_VERSION, cloneState, initialState, type GameState } from './state';
 import { REBASED_UPGRADE_IDS, UPGRADE_IDS } from './upgrades';
+import { STARDUST_IDS } from './prestige';
 import { stageIndexFor } from './stages';
 import { ACHIEVEMENTS } from './achievements';
 
@@ -51,6 +52,17 @@ const MIGRATIONS: Record<number, (raw: SaveBlob) => SaveBlob> = {
       rebasedStage: stageIndexFor(asDecimal(raw.totalMassEver, '0')),
     };
   },
+
+  /**
+   * 2 -> 3: the supernova arrived, and with it Stardust, the permanent tree and a collapse
+   * count. Every one of those fields is new and starts at zero, and `deserialize` already
+   * defaults anything missing from `initialState`, so there is nothing to move.
+   *
+   * The entry is here anyway rather than letting `migrate` skip a version. A save format with
+   * holes in its migration chain is one where the next additive change looks identical to a
+   * forgotten one, and the difference only shows up in somebody's lost save.
+   */
+  2: (raw) => ({ ...raw, version: 3 }),
 };
 
 export function serialize(s: GameState): SaveBlob {
@@ -64,6 +76,10 @@ export function serialize(s: GameState): SaveBlob {
     levelsEver: { ...s.levelsEver },
     autoBuy: { ...s.autoBuy },
     achievements: [...s.achievements],
+    stardust: s.stardust.toString(),
+    stardustEver: s.stardustEver.toString(),
+    collapses: s.collapses,
+    stardustLevels: { ...s.stardustLevels },
     playTime: s.playTime,
     pulseReadyAt: s.pulseReadyAt,
     stageSeen: s.stageSeen,
@@ -130,6 +146,12 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
     ? [...new Set(blob.achievements.filter((id): id is string => typeof id === 'string' && known.has(id)))]
     : [];
 
+  const stardustRaw = (blob.stardustLevels ?? {}) as Record<string, unknown>;
+  const stardustLevels = { ...base.stardustLevels };
+  for (const id of STARDUST_IDS) {
+    stardustLevels[id] = Math.max(0, Math.floor(asFiniteNumber(stardustRaw[id], 0)));
+  }
+
   const settings = (blob.settings ?? {}) as Record<string, unknown>;
   const stats = (blob.stats ?? {}) as Record<string, unknown>;
   const totalMassEver = asDecimal(blob.totalMassEver, '0');
@@ -148,6 +170,10 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
     // should not wipe the player's rebased levels on the next tick for no reason.
     rebasedStage: Math.max(0, Math.floor(asFiniteNumber(blob.rebasedStage, stageIndexFor(totalMassEver)))),
     achievements,
+    stardust: asDecimal(blob.stardust, '0'),
+    stardustEver: asDecimal(blob.stardustEver, '0'),
+    collapses: Math.max(0, Math.floor(asFiniteNumber(blob.collapses, 0))),
+    stardustLevels,
     lastSeen: asFiniteNumber(blob.lastSeen, now),
     settings: {
       notation:

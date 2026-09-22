@@ -3,6 +3,7 @@
   import { game } from '../game.svelte';
   import UpgradeCard from './UpgradeCard.svelte';
   import Breakdown from './Breakdown.svelte';
+  import Collapse from './Collapse.svelte';
   import Stages from './Stages.svelte';
   import Achievements from './Achievements.svelte';
   import Elements from './Elements.svelte';
@@ -13,15 +14,19 @@
 
   let stage: HTMLDivElement;
 
-  type Tab = 'core' | 'energy' | 'progress' | 'settings';
+  type Tab = 'core' | 'energy' | 'collapse' | 'progress' | 'settings';
   let tab = $state<Tab>('core');
 
   // The Energy tab only exists once there is a disk. Keeping it out of the bar until then is
   // the difference between a game that unfolds and one that starts with four empty rooms.
+  // The Collapse tab appears the first time a collapse is possible and never leaves again,
+  // because after the first supernova it holds the tree you are spending in. Before that, a
+  // tab offering an ending to a game you have not finished is only a spoiler.
   const tabs = $derived(
     [
       { id: 'core' as const, label: 'Core' },
       ...(view.energyUnlocked ? [{ id: 'energy' as const, label: 'Energy' }] : []),
+      ...(view.canCollapse || view.collapses !== '0' ? [{ id: 'collapse' as const, label: 'Collapse' }] : []),
       { id: 'progress' as const, label: 'Progress' },
       { id: 'settings' as const, label: 'Settings' },
     ],
@@ -115,6 +120,9 @@
           {#if entry.id === 'energy' && view.nextElementName}
             <span class="pip" aria-hidden="true"></span>
           {/if}
+          {#if entry.id === 'collapse' && view.canCollapse}
+            <span class="pip" aria-hidden="true"></span>
+          {/if}
         </button>
       {/each}
     </nav>
@@ -150,6 +158,8 @@
           <UpgradeCard {upgrade} onbuy={game.buy} onautobuy={game.toggleAutoBuy} />
         {/each}
       </div>
+    {:else if tab === 'collapse'}
+      <Collapse {view} {game} />
     {:else if tab === 'progress'}
       <Stages {view} />
       <Achievements {view} />

@@ -3,6 +3,7 @@ import { PULSE_COOLDOWN, type GameState } from './state';
 import { ACHIEVEMENTS, multiplierFor } from './achievements';
 import { costScaleAt, stageIndexFor } from './stages';
 import { elementAt, elementTierFor, nextRequirement } from './elements';
+import { stardustEffects } from './prestige';
 import {
   REBASED_UPGRADE_IDS,
   UPGRADE_LIST,
@@ -63,7 +64,12 @@ export function promotionMultiplier(stage: number): number {
   return costScaleAt(stage).pow(PROMOTION_SHARE).toNumber();
 }
 
-/** Levels of an upgrade before it will buy itself. */
+/**
+ * Levels of an upgrade before it will buy itself, before Stardust lowers it.
+ *
+ * Kept as the export the UI and tests reason about; `stardustEffects` is the thing that
+ * actually decides, so that Muscle Memory has one place to take effect rather than several.
+ */
 export const AUTO_BUY_LEVEL = 25;
 
 /**
@@ -99,6 +105,8 @@ export interface Rates {
   stage: number;
   /** What the ladder alone is currently multiplying income by. */
   promotionMultiplier: number;
+  /** What Stardust alone is currently multiplying income by. */
+  stardustMultiplier: number;
   spawnRate: number;
   massPerParticle: Num;
   globalMultiplier: number;
@@ -130,8 +138,15 @@ export function deriveRates(s: GameState): Rates {
   const stage = stageIndexFor(s.totalMassEver);
   const ladderMultiplier = promotionMultiplier(stage);
 
+  // Everything Stardust does to income enters here and nowhere else. A prestige layer that
+  // reaches into three or four terms is a prestige layer nobody can balance.
+  const stardust = stardustEffects(s);
+
   const globalMultiplier =
-    Math.pow(1.34, s.levels.efficiency) * multiplierFor(s.achievements.length) * ladderMultiplier;
+    Math.pow(1.34, s.levels.efficiency) *
+    multiplierFor(s.achievements.length) *
+    ladderMultiplier *
+    stardust.massMultiplier;
 
   const reach = radius * Math.sqrt(gravity);
   // Guard the far end: once gravity overflows a float the fraction is 1 for all purposes.
@@ -154,7 +169,12 @@ export function deriveRates(s: GameState): Rates {
   const energyPerSecond = hasDisk ? rawMassPerSecond.mul(diskThroughput) : D(0);
 
   const requirementScale = Math.pow(0.9, s.levels.confinement);
-  const elementTier = hasDisk ? elementTierFor(diskThroughput, requirementScale) : 0;
+  // Prior Ignition is a floor, not a bonus: the nebula is already salted with what you fused
+  // last time, so the chain starts partway up rather than every tier being worth more.
+  const elementTier = Math.max(
+    stardust.startingTier,
+    hasDisk ? elementTierFor(diskThroughput, requirementScale) : 0,
+  );
   const elementMultiplier = elementAt(elementTier).multiplier;
 
   const massPerSecond = rawMassPerSecond.mul(elementMultiplier);
@@ -171,6 +191,7 @@ export function deriveRates(s: GameState): Rates {
     captureFraction,
     stage,
     promotionMultiplier: ladderMultiplier,
+    stardustMultiplier: stardust.massMultiplier,
     spawnRate,
     massPerParticle: massPerParticle.mul(elementMultiplier),
     globalMultiplier,
@@ -219,7 +240,7 @@ function spend(s: GameState, def: UpgradeDef, amount: Num): void {
  * hand back its auto-buyer at every promotion.
  */
 export function autoBuyUnlocked(s: GameState, id: UpgradeId): boolean {
-  return s.levelsEver[id] >= AUTO_BUY_LEVEL;
+  return s.levelsEver[id] >= stardustEffects(s).autoBuyLevel;
 }
 
 export function autoBuyersAvailable(s: GameState): number {

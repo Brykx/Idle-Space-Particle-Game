@@ -356,6 +356,54 @@ test.describe('the game runs', () => {
     await expect(ladder.locator('.value')).toHaveText(/x[\d.]+/);
   });
 
+  test('collapses the star, and the run after it survives a reload', async ({ page }) => {
+    // The one flow in the game that deletes almost everything on purpose. If it is wrong it
+    // is wrong in the worst possible way, so it is driven end to end rather than unit-tested
+    // and hoped for: arm, confirm, and then reload to prove the wreckage was written down.
+    await seedSave(page, {
+      mass: '5e21',
+      totalMassEver: '5e21',
+      levels: { gravity: 80, radius: 60, density: 8, particleMass: 50, efficiency: 18 },
+      levelsEver: { gravity: 80, radius: 60, density: 160, particleMass: 50, efficiency: 18 },
+      rebasedStage: 11,
+      stageSeen: 11,
+    });
+    await page.reload();
+    await expect(page.locator('.stage-name')).toHaveText('Supergiant');
+
+    await page.getByRole('button', { name: 'Collapse' }).click();
+    await expect(page.locator('.offer .payout')).toContainText('stardust');
+
+    // Two clicks, and the second only appears after the first has said what it costs.
+    await expect(page.getByRole('button', { name: 'Collapse the star' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Collapse…' }).click();
+    await expect(page.locator('.offer .cost')).toContainText('lose');
+    await page.getByRole('button', { name: 'Collapse the star' }).click();
+
+    // Back at the bottom, with something to show for it.
+    await expect(page.locator('.stage-name')).toHaveText('Dust');
+    const stardust = await page.locator('.readouts .value').first().innerText();
+    expect(Number(stardust)).toBeGreaterThan(0);
+    await expect(page.locator('.readouts .value').nth(1)).toHaveText('1');
+
+    // Spend some of it, then come back in a fresh page: a collapse that is not on disk is a
+    // collapse that closing the tab undoes, which is the worst bug this screen could have.
+    await page.locator('.tree .card', { hasText: 'Enriched Nebula' }).locator('.buy').click();
+    await expect(page.locator('.tree .card', { hasText: 'Enriched Nebula' }).locator('.level')).toHaveText('Lv 1');
+
+    // A new page rather than a reload. `seedSave` installs an init script, and an init script
+    // runs on every navigation — reloading here would helpfully write the pre-collapse save
+    // back over the top and the test would be checking the fixture, not the game.
+    const returning = await page.context().newPage();
+    await returning.goto('/');
+    await returning.getByRole('button', { name: 'Collapse' }).click();
+    await expect(returning.locator('.readouts .value').nth(1)).toHaveText('1');
+    await expect(returning.locator('.tree .card', { hasText: 'Enriched Nebula' }).locator('.level'))
+      .toHaveText('Lv 1');
+    await expect(returning.locator('.stage-name')).toHaveText('Dust');
+    await returning.close();
+  });
+
   // Every body kind the ladder can reach by mass. The last two stages, the neutron star and
   // the black hole, carry no threshold — they arrive with the supernova in Phase 3 — so they
   // are covered by `bodies.html` instead, which mounts the field on its own.

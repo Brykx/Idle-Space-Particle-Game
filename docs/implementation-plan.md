@@ -152,13 +152,36 @@ Still to do:
 
 **Done when:** a 6-hour session has something new every ~20 minutes.
 
-### Phase 3 — Supernova prestige (~2 days)
-Reset layers, stardust formula, the permanent tree, nebula restart state, the supernova
-sequence itself, and the iron wall that prompts it. Tabs already arrived in Phase 2, so the
-navigation for it exists.
+### Phase 3 — Supernova prestige — done
 
-**Done when:** run 2 reaches the Brown Dwarf stage in under a third of run 1's time and feels
-different doing it.
+`sim/prestige.ts` holds all of it: the Stardust formula, the five-card permanent tree, and
+the collapse itself. Everything the tree does to income enters `deriveRates` at a single
+point, because a prestige layer that reaches into four terms is one nobody can balance.
+
+**Measured against the bar.** Collapsing ten minutes past the top of the ladder pays 115
+stardust, and run 2 reaches Brown Dwarf 3.2x faster — the bar was "under a third". The whole
+ladder comes in 2.8x faster. Collapsing the instant the ladder tops out pays 12 and is worth
+1.7x; waiting twenty-five minutes pays 7,450 and is worth 16x. That spread is the decision
+the layer is built around, and `npm run balance` prints all three so a tuning change cannot
+quietly flatten it.
+
+**Stardust is a `Decimal`.** It goes as mass to the 0.6 and mass has no ceiling, so a plain
+number stops counting somewhere in run three or four. The project already carries an exact
+big-number type; a prestige currency opting out of it is a bug with a long fuse.
+
+**What survives a collapse is chosen, not incidental.** Achievements, because you did them.
+Levels *ever* bought, so a collapse never takes back an auto-buyer — the tree has its own
+answer to automation and removing the floor at the moment you start over would make run two a
+worse run one for twenty minutes. Auto-buy toggles, because they are a preference. Everything
+else goes, `stageSeen` included, so the ladder announces itself again.
+
+**The iron wall** turned out to need no new mechanic. The chain already stops at silicon and
+the ladder already stops at Supergiant; what was missing was a way *through*, which is what
+this phase is. The Collapse tab says so in as many words.
+
+Still open here: the second prestige (Act IV) is Phase 5, and the Neutron Star and Black Hole
+stages remain unreachable by play — the remnant is shown for six seconds after a collapse,
+which is the only place that body appears in the game.
 
 ### Phase 4 — Visual pass (~2-3 days)
 

@@ -1,4 +1,4 @@
-import { format, formatDuration, type Notation } from './sim/numbers';
+import { format, formatDuration, type Notation, type Num } from './sim/numbers';
 import {
   AUTO_BUY_LEVEL,
   autoBuyUnlocked,
@@ -15,7 +15,34 @@ import { ELEMENTS, REACHABLE_ELEMENTS, elementAt } from './sim/elements';
 import { initialState, type GameState } from './sim/state';
 import { UPGRADE_LIST, maxAffordable, type UpgradeId } from './sim/upgrades';
 import { applyOffline, type AwayReport } from './sim/offline';
-import { STAGES, stageAt, stageIndexFor, stageProgress } from './sim/stages';
+import {
+  STARDUST_LIST,
+  buyStardust,
+  canCollapse,
+  collapse,
+  stardustCost,
+  stardustEffects,
+  stardustFor,
+  type StardustId,
+} from './sim/prestige';
+import { ACCRETION_STAGES, STAGES, stageAt, stageIndexFor, stageProgress } from './sim/stages';
+
+/** Index of the last stage accretion alone can reach — the one a collapse is offered at. */
+const ACCRETION_TOP = ACCRETION_STAGES.length - 1;
+
+/** The neutron star: what a supernova leaves, and the only place it is shown for now. */
+const REMNANT_STAGE = STAGES.findIndex((stage) => stage.look.body === 'remnant');
+
+/**
+ * Stardust is a counting number, so it is shown as one until it stops being countable.
+ *
+ * The general formatter prints "6.00", which is right for mass — a continuous quantity you
+ * only ever see two significant figures of — and wrong for a currency where the difference
+ * between 6 and 7 is a purchase.
+ */
+function formatStardust(value: Num, notation: Notation): string {
+  return value.lt(1e5) ? String(Math.floor(value.toNumber())) : format(value, notation);
+}
 import { deserialize, exportSave as exportSaveString, importSave, serialize } from './sim/save';
 import { clearSave, readSave, writeSave } from './storage';
 import { createField, type FieldHandle } from './render/Field';
@@ -39,6 +66,14 @@ const FIELD_INTERVAL = 1 / 4;
 const AUTOSAVE_INTERVAL = 10;
 /** How long an announcement stays on screen. */
 const ANNOUNCE_SECONDS = 5;
+
+/**
+ * How long the field keeps showing the remnant after a collapse.
+ *
+ * Long enough to register as an event rather than a flicker, short enough that it is not in
+ * the way of the run that has already started underneath it.
+ */
+const SUPERNOVA_SECONDS = 6;
 /** More than this unlocking at once is summarised rather than queued one by one. */
 const ANNOUNCE_BATCH_LIMIT = 2;
 /** A gap larger than this is treated as an absence and credited through the offline path. */
@@ -66,6 +101,19 @@ export interface UpgradeView {
   /** Resets to zero at every promotion, and is repriced to the new stage. */
   rebased: boolean;
   currency: 'mass' | 'energy';
+}
+
+export interface StardustView {
+  id: StardustId;
+  name: string;
+  blurb: string;
+  perLevel: string;
+  /** What the levels you own currently do, e.g. "x2.01 to all mass". */
+  effect: string;
+  level: number;
+  cost: string;
+  affordable: boolean;
+  maxed: boolean;
 }
 
 export interface ElementRowView {
@@ -113,6 +161,18 @@ export interface View {
   /** What the next promotion would multiply income by, e.g. "x2.9". Empty at the top. */
   nextPromotion: string;
   stages: StageRowView[];
+
+  // --- the supernova -------------------------------------------------------------------
+  stardust: string;
+  collapses: string;
+  canCollapse: boolean;
+  /** What a collapse would pay right now. */
+  collapseYield: string;
+  /** Shown instead, when it is not yet possible. */
+  collapseRequirement: string;
+  stardustUpgrades: StardustView[];
+  /** True while the field is showing the remnant, just after a collapse. */
+  supernova: boolean;
 
   /** Set when something is unlocked; clears itself after a few seconds. */
   announceEyebrow: string;
@@ -183,6 +243,13 @@ function emptyView(): View {
     nextStageThreshold: '',
     ladderBonus: '',
     nextPromotion: '',
+    stardust: '0',
+    collapses: '0',
+    canCollapse: false,
+    collapseYield: '0',
+    collapseRequirement: '',
+    stardustUpgrades: [],
+    supernova: false,
     stages: [],
     announceEyebrow: '',
     announceTitle: '',
@@ -237,6 +304,8 @@ function createGame() {
   let running = false;
   let frameHandle = 0;
   let accumulator = 0;
+  /** `playTime` until which the field shows the remnant instead of the current stage. */
+  let supernovaUntil = 0;
   let uiTimer = 0;
   let fieldTimer = 0;
   let saveTimer = 0;
@@ -331,6 +400,43 @@ function createGame() {
       ? `x${(promotionMultiplier(progress.index + 1) / rates.promotionMultiplier).toFixed(2)}`
       : '';
 
+    // --- the supernova ---------------------------------------------------------------
+    view.stardust = formatStardust(state.stardust, notation);
+    view.collapses = String(state.collapses);
+    view.canCollapse = canCollapse(state);
+    view.collapseYield = formatStardust(stardustFor(state), notation);
+    view.collapseRequirement = view.canCollapse
+      ? ''
+      : `Reach ${stageAt(ACCRETION_TOP).name} to collapse`;
+
+    const effects = stardustEffects(state);
+    const effectOf: Record<StardustId, string> = {
+      enrichment: effects.massMultiplier > 1 ? `x${effects.massMultiplier.toFixed(2)} to all mass` : 'none',
+      seed: effects.seedMass.gt(0) ? `${format(effects.seedMass, notation)} starting mass` : 'none',
+      ignition: effects.startingTier > 0 ? `start at ${elementAt(effects.startingTier).name}` : 'none',
+      slumber: effects.offlineRate > 1 ? `+${Math.round((effects.offlineRate - 1) * 100)}% offline rate` : 'none',
+      memory: effects.autoBuyLevel < AUTO_BUY_LEVEL ? `automate at Lv ${effects.autoBuyLevel}` : 'none',
+    };
+
+    view.supernova = state.playTime < supernovaUntil;
+
+    view.stardustUpgrades = STARDUST_LIST.map((def) => {
+      const level = state.stardustLevels[def.id];
+      const maxed = level >= def.maxLevel;
+      const cost = stardustCost(def, level);
+      return {
+        id: def.id,
+        name: def.name,
+        blurb: def.blurb,
+        perLevel: def.perLevel,
+        effect: effectOf[def.id],
+        level,
+        cost: formatStardust(cost, notation),
+        affordable: state.stardust.gte(cost),
+        maxed,
+      };
+    });
+
     view.stages = STAGES.map((stage, index) => ({
       id: stage.id,
       name: stage.name,
@@ -395,7 +501,7 @@ function createGame() {
         term: def.term,
         perLevel: def.perLevel,
         level: state.levels[def.id],
-        cost: format(cost, notation),
+        cost: formatStardust(cost, notation),
         affordable,
         maxLevels: best.levels,
         maxCost: format(best.cost, notation),
@@ -493,7 +599,10 @@ function createGame() {
   function refreshField(): void {
     if (!field) return;
     const rates = deriveRates(state);
-    const { look } = stageAt(stageIndexFor(state.totalMassEver));
+    // Just after a collapse the field shows what you became rather than what you are now.
+    // The run underneath has already restarted; this is only the view lagging on purpose.
+    const remnant = state.playTime < supernovaUntil;
+    const { look } = remnant ? stageAt(REMNANT_STAGE) : stageAt(stageIndexFor(state.totalMassEver));
     field.setRates({
       // Emission tracks the real spawn rate until it outgrows the screen, then grows
       // logarithmically so the field keeps thickening without ever flooding.
@@ -637,6 +746,31 @@ function createGame() {
       refreshView();
     },
 
+    buyStardust(id: StardustId): void {
+      if (!buyStardust(state, id)) return;
+      save();
+      refreshView();
+      refreshField();
+    },
+
+    /**
+     * Collapse the star.
+     *
+     * The field shows the remnant for a moment before the new run's dust arrives, which is
+     * the only place the neutron star body appears until the second prestige exists. It is
+     * also the one payoff the ladder's top has: you see what you became.
+     */
+    collapse(): void {
+      const gained = collapse(state);
+      if (gained === null) return;
+      supernovaUntil = state.playTime + SUPERNOVA_SECONDS;
+      announce('SUPERNOVA', `${formatStardust(gained, state.settings.notation)} stardust`, 'What is left of you is a neutron star, and a cloud you will condense out of again.');
+      showNextAnnouncement();
+      save();
+      refreshView();
+      refreshField();
+    },
+
     setAutoBuyReserve(fraction: number): void {
       state.settings.autoBuyReserve = Math.max(0, Math.min(0.9, fraction));
       refreshView();
@@ -700,3 +834,5 @@ function createGame() {
 }
 
 export const game = createGame();
+
+export type Game = ReturnType<typeof createGame>;

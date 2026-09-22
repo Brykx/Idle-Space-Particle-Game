@@ -147,7 +147,7 @@ describe('the version 1 save', () => {
 
   it('loads, and applies the new rule where the player is standing', () => {
     const s = deserialize(v1, NOW);
-    expect(s.version).toBe(2);
+    expect(s.version).toBe(3);
     expect(s.levels.density, 'rebased levels go').toBe(0);
     expect(s.rebasedStage, 'and the reset is recorded, so the next tick does not repeat it')
       .toBe(stageIndexFor(D('1e10')));

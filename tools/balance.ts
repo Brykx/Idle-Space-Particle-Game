@@ -1,8 +1,15 @@
-import { format, formatDuration } from '../src/sim/numbers';
+import { D, format, formatDuration, type Num } from '../src/sim/numbers';
 import { buy, canAfford, deriveRates, nextCost, pulse, pulseReady, tick, unlockedUpgrades } from '../src/sim/economy';
 import { initialState, type GameState } from '../src/sim/state';
 import { UPGRADES, type UpgradeId } from '../src/sim/upgrades';
 import { ACCRETION_STAGES } from '../src/sim/stages';
+import {
+  STARDUST_LIST,
+  buyStardust,
+  collapse,
+  stardustCost,
+  stardustFor,
+} from '../src/sim/prestige';
 import { REACHABLE_ELEMENTS } from '../src/sim/elements';
 
 /**
@@ -61,6 +68,8 @@ export interface ShapeSample {
 }
 
 export interface PacingRun {
+  /** The state the run finished in, so a collapse can be measured from it. */
+  state: GameState;
   milestones: PacingResult[];
   /** The first hour, where a new player decides whether to stay. */
   firstHour: Feel;
@@ -76,6 +85,8 @@ export interface PacingOptions {
   /** Whether the imaginary player clicks Gravity Pulse whenever it is up. */
   clicks?: boolean;
   policy?: Policy;
+  /** Start from this state instead of a fresh one. Used to measure a run after a collapse. */
+  from?: GameState;
 }
 
 export type Policy = 'cheapest' | 'payback';
@@ -166,9 +177,9 @@ function spend(s: GameState, policy: Policy): number {
 }
 
 export function runPacing(options: PacingOptions = {}): PacingRun {
-  const { limitSeconds = 24 * 3600, step = 0.1, clicks = true, policy = 'payback' } = options;
+  const { limitSeconds = 24 * 3600, step = 0.1, clicks = true, policy = 'payback', from } = options;
 
-  const s = initialState(0);
+  const s = from ?? initialState(0);
   const results: PacingResult[] = [];
   let next = 0;
 
@@ -176,19 +187,26 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
   const elementTimes: Array<{ name: string; seconds: number }> = [];
   let elementSeen = 0;
   const shape: ShapeSample[] = [];
-  let shapeAt = 0;
+  let shapeAt = -1;
   const gains: number[] = [];
   /** (playTime, log2 of income) samples, for the doubling-time estimate. */
   const incomeLog: Array<[number, number]> = [];
-  let sampleAt = 0;
+  let sampleAt = -1;
 
-  while (s.playTime < limitSeconds && next < MILESTONES.length) {
+  // A state handed in has already passed some milestones, and time is measured from where it
+  // starts rather than from zero — otherwise run two reports run one's clock.
+  const startedAt = s.playTime;
+  while (next < MILESTONES.length && MILESTONES[next] && s.totalMassEver.gte(MILESTONES[next]!.threshold ?? D(Infinity))) {
+    next += 1;
+  }
+
+  while (s.playTime - startedAt < limitSeconds && next < MILESTONES.length) {
     tick(s, step);
     if (clicks && pulseReady(s)) pulse(s);
     const incomeBefore = deriveRates(s).massPerSecond;
     const decisions = spend(s, policy);
     if (decisions > 0) {
-      for (let i = 0; i < decisions; i++) decisionTimes.push(s.playTime);
+      for (let i = 0; i < decisions; i++) decisionTimes.push(s.playTime - startedAt);
       const after = deriveRates(s).massPerSecond;
       gains.push(after.div(incomeBefore).toNumber() - 1);
     }
@@ -211,7 +229,7 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
 
     if (s.playTime >= sampleAt) {
       const mps = deriveRates(s).massPerSecond;
-      if (mps.gt(0)) incomeLog.push([s.playTime, mps.log10() / Math.log10(2)]);
+      if (mps.gt(0)) incomeLog.push([s.playTime - startedAt, mps.log10() / Math.log10(2)]);
       sampleAt = s.playTime + 10;
     }
 
@@ -220,7 +238,7 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
       results.push({
         id: milestone.id,
         label: milestone.name,
-        seconds: s.playTime,
+        seconds: s.playTime - startedAt,
         levels: { ...s.levels },
       });
       next += 1;
@@ -235,7 +253,13 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
     }
   }
 
-  return { milestones: results, firstHour: feel(decisionTimes, gains, incomeLog, 3600), shape, elements: elementTimes };
+  return {
+    state: s,
+    milestones: results,
+    firstHour: feel(decisionTimes, gains, incomeLog, 3600),
+    shape,
+    elements: elementTimes,
+  };
 }
 
 function median(values: number[]): number {
@@ -278,6 +302,69 @@ function feel(
   };
 }
 
+/**
+ * Play run one to the top, collapse, spend the Stardust, and play run two.
+ *
+ * The only claim Phase 3 makes that can be checked by measuring rather than by feel is that
+ * the second run is meaningfully faster than the first. Everything else about a prestige
+ * layer — whether the tree is interesting, whether the decision of when to collapse is a
+ * real one — needs a person. This does not answer those. It answers whether the numbers move.
+ *
+ * Stardust is spent cheapest-first, which is what clearing a five-card tree looks like.
+ */
+export interface CollapseRun {
+  firstRun: PacingRun;
+  secondRun: PacingRun;
+  /** Seconds played past the top of the ladder before collapsing. */
+  pushSeconds: number;
+  stardust: Num;
+  spent: Array<{ name: string; level: number }>;
+}
+
+/**
+ * `pushSeconds` is the whole decision the prestige layer is built around, so it is a
+ * parameter rather than a constant.
+ *
+ * Collapsing the instant the ladder tops out is the worst available moment and nobody plays
+ * that way, but it is what a bot does unless told otherwise — and reporting it as though it
+ * were the answer would make the tree look far weaker than it is. The yield goes as mass to
+ * the 0.6, and mass is exponential in time, so twenty more minutes is not twenty percent more
+ * Stardust. Measuring two or three push times is the only way to see that.
+ */
+export function runCollapse(pushSeconds = 0): CollapseRun {
+  const first = runPacing();
+  const s = first.state;
+
+  // Keep playing past the top before pulling the trigger.
+  for (let t = 0; t < pushSeconds; t += 0.1) {
+    tick(s, 0.1);
+    if (pulseReady(s)) pulse(s);
+    spend(s, 'payback');
+  }
+
+  const stardust = stardustFor(s);
+  collapse(s);
+
+  for (;;) {
+    const options = STARDUST_LIST.map((def) => ({ def, cost: stardustCost(def, s.stardustLevels[def.id]) }))
+      .filter((o) => o.def.maxLevel > s.stardustLevels[o.def.id] && o.cost.lte(s.stardust))
+      .sort((a, b) => (a.cost.lt(b.cost) ? -1 : 1));
+    const best = options[0];
+    if (!best || !buyStardust(s, best.def.id)) break;
+  }
+
+  return {
+    firstRun: first,
+    secondRun: runPacing({ from: s }),
+    pushSeconds,
+    stardust,
+    spent: STARDUST_LIST.filter((def) => s.stardustLevels[def.id] > 0).map((def) => ({
+      name: def.name,
+      level: s.stardustLevels[def.id],
+    })),
+  };
+}
+
 function main(): void {
   const run = runPacing();
   const s = initialState(0);
@@ -309,6 +396,23 @@ function main(): void {
       `\n              +${(gainPerPurchase * 100).toFixed(1)}% per purchase   (target: over 1%)` +
       `   longest wait ${formatDuration(worstGap)}`,
   );
+
+  console.log('\n  after a supernova — run 2, against how long run 1 took\n');
+  for (const push of [0, 10 * 60, 25 * 60]) {
+    const c = runCollapse(push);
+    const label = push === 0 ? 'collapse on arrival' : `${push / 60} min past the top`;
+    console.log(`  ${label}: ${format(c.stardust, 'letters')} stardust`);
+    console.log(`    spent on ${c.spent.map((x) => `${x.name} ${x.level}`).join(', ') || 'nothing'}`);
+    const line = c.firstRun.milestones
+      .map((a) => {
+        const b = c.secondRun.milestones.find((x) => x.id === a.id);
+        if (!b || !Number.isFinite(b.seconds)) return null;
+        return `${a.label.split(' ')[0]} x${(a.seconds / Math.max(b.seconds, 1)).toFixed(1)}`;
+      })
+      .filter(Boolean)
+      .join('  ');
+    console.log(`    ${line}\n`);
+  }
 
   const rates = deriveRates(s);
   console.log(

@@ -1,5 +1,6 @@
 import { D, type Num } from './numbers';
 import { autoBuyersOn, tick } from './economy';
+import { stardustEffects } from './prestige';
 import type { GameState } from './state';
 
 /**
@@ -66,9 +67,15 @@ export function applyOffline(s: GameState, now = Date.now()): AwayReport | null 
   // stat written afterwards would not be seen until the next one.
   s.stats.longestAway = Math.max(s.stats.longestAway, awaySeconds);
 
+  // Deep Slumber buys back the coarse-step shortfall by simulating more seconds than passed.
+  // It is capped at restoring parity and no further, on purpose: an absence that pays better
+  // than being present turns the best strategy into closing the tab, which is not a thing to
+  // sell a player as an upgrade.
+  const simulated = creditedSeconds * stardustEffects(s).offlineRate;
+
   const stepSeconds = autoBuyersOn(s) > 0 ? STEP_SECONDS_AUTOMATED : STEP_SECONDS_IDLE;
-  const steps = Math.max(1, Math.ceil(creditedSeconds / stepSeconds));
-  const dt = creditedSeconds / steps;
+  const steps = Math.max(1, Math.ceil(simulated / stepSeconds));
+  const dt = simulated / steps;
   for (let i = 0; i < steps; i++) tick(s, dt);
 
   if (awaySeconds < MIN_REPORTABLE_SECONDS) return null;
