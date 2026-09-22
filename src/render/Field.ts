@@ -6,6 +6,7 @@ import {
   ParticleContainer,
   Sprite,
 } from 'pixi.js';
+import { createGasGiant, type Impostor } from './impostor';
 import { DEFAULT_TUNING, ParticlePool, type FieldGeometry } from './pool';
 import { LUMINOUS, makeSceneTextures } from './textures';
 import type { BodyKind } from '../sim/stages';
@@ -183,7 +184,14 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   corePrevious.blendMode = 'add';
   corePrevious.alpha = 0;
 
-  app.stage.addChild(stars, field, halo, corePrevious, core, effects);
+  // The gas giant is drawn by a shader rather than a texture. If this renderer cannot run
+  // GLSL it stays null and the field falls back to the canvas body, which still works.
+  const impostor: Impostor | null = createGasGiant(app.renderer);
+  const impostorKinds: ReadonlySet<BodyKind> = impostor ? new Set<BodyKind>(['gas']) : new Set();
+
+  app.stage.addChild(stars, field, halo, corePrevious, core);
+  if (impostor) app.stage.addChild(impostor.view);
+  app.stage.addChild(effects);
 
   // --- state -------------------------------------------------------------------------
   const tuning = { ...DEFAULT_TUNING };
@@ -223,6 +231,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   /** 0..1, ramps up after a body change while the previous body fades out. */
   let bodyBlend = 1;
   let shownBody: BodyKind = 'mote';
+  let previousBody: BodyKind = 'mote';
   let particlesAreHard = false;
 
   let pulseStrength = 1;
@@ -289,6 +298,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     halo.position.set(geo.centreX, geo.centreY);
     core.position.set(geo.centreX, geo.centreY);
     corePrevious.position.set(geo.centreX, geo.centreY);
+    impostor?.view.position.set(geo.centreX, geo.centreY);
   }
 
   rebuildPool(rates.budget);
@@ -395,6 +405,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       corePrevious.tint = core.tint;
       core.texture = textures.body[rates.body];
       core.blendMode = LUMINOUS.has(rates.body) ? 'add' : 'normal';
+      previousBody = shownBody;
       shownBody = rates.body;
       bodyBlend = 0;
     }
@@ -420,8 +431,32 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     core.tint = luminous
       ? mixColour(coreTint, 0xffffff, 0.3 + flash * 0.4)
       : mixColour(coreTint, 0xffffff, flash * 0.35);
-    core.alpha = luminous ? 0.85 + flash * 0.15 : bodyBlend;
-    corePrevious.alpha = 1 - bodyBlend;
+
+    // A shader body and a sprite body occupy the same slot, so exactly one of them carries
+    // each side of a crossfade and the other is held at zero.
+    const enteringMesh = impostorKinds.has(shownBody);
+    const leavingMesh = impostorKinds.has(previousBody);
+
+    core.alpha = enteringMesh ? 0 : luminous ? 0.85 + flash * 0.15 : bodyBlend;
+    corePrevious.alpha = leavingMesh ? 0 : 1 - bodyBlend;
+
+    if (impostor) {
+      // Once the fade out has finished the mesh has nothing left to say, so stop drawing it
+      // — otherwise a single visit to the gas giant leaves a transparent quad in every
+      // subsequent frame for the rest of the run.
+      impostor.view.visible = enteringMesh || (leavingMesh && bodyBlend < 1);
+      if (impostor.view.visible) {
+        impostor.update(rates.reducedMotion ? 0 : time, {
+          // The sprite bodies fill 94% of a 256px texture, so their drawn radius is
+          // 120 * scale. Matching it keeps a promotion into the gas giant the same size as
+          // the body it replaced, rather than a sudden shrink.
+          radius: coreScale * 120,
+          tint: coreTint,
+          alpha: enteringMesh ? bodyBlend : 1 - bodyBlend,
+          flash,
+        });
+      }
+    }
 
     // The halo is light, so it belongs to bodies that emit it. A rock gets a hint of dust.
     halo.scale.set(coreScale * (luminous ? 3.4 : 2.2));

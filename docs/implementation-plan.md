@@ -16,6 +16,8 @@ src/
     save.ts            # serialize, deserialize, MIGRATIONS[]
   render/
     Field.ts           # the only file that imports pixi; init/setRates/pulse/destroy
+    textures.ts        # procedural canvas bodies, one per BodyKind
+    impostor.ts        # sphere-impostor shaders; the gas giant, for now
     pool.ts            # pre-allocated particle pool, zero per-frame allocation
     effects.ts         # pulse, ignition, supernova, lensing
   ui/                  # Svelte components; read snapshots, dispatch intents
@@ -161,16 +163,27 @@ different doing it.
 - **Field identity per stage — done.** `StageLook` carries particle size, count, orbit range,
   drag and lifetime; particles get bigger and fewer as the core climbs, with the lit area
   rising only 2.6x across the ladder. Field *width* is the one part not done.
-- **Core surface detail — done, without shaders.** `StageLook` carries a `BodyKind`, and
+- **Core surface detail — done.** `StageLook` carries a `BodyKind`, and
   `render/textures.ts` draws one procedural canvas per kind at start-up: cratered irregular
   rocks, mottled worlds with an atmosphere limb, a banded gas giant with a storm, a dim
   self-lit ember, a hard star, a spiked neutron remnant, and a black hole that is an actual
   opaque hole with a ring. Solid kinds draw with normal blending so they occlude the field and
-  can be dark on one side; only luminous kinds keep the additive glow. Remaining here: real
-  shaders would add a moving terminator and specular detail, but the silhouette problem is
-  solved.
+  can be dark on one side; only luminous kinds keep the additive glow.
+- **Sphere impostors — spiked on the gas giant.** A canvas body is a *picture* of an object:
+  the lighting is baked in at start-up, so the terminator never moves and the detail is
+  whatever 256px could hold. `render/impostor.ts` computes the disc per pixel instead —
+  recovering the sphere normal from the fragment position, then doing the lighting, limb
+  darkening, atmospheric rim and cloud detail in GLSL, with the clouds sampled in body space
+  so they rotate with the planet and compress correctly towards the limb. Still one draw
+  call, still one quad; the difference is that it is an object rather than a sticker.
+
+  Only the gas giant is built this way so far, and the field falls back to the canvas body if
+  the renderer is not WebGL. The remaining seven kinds are variations on the same skeleton:
+  swap the surface function and the lighting model, keep the impostor maths. `world` and
+  `ember` are the obvious next two, since both are spheres with an atmosphere; `rock` needs a
+  non-spherical silhouette and `hole` needs lensing, so both are their own problem.
 - Field **width** per stage, the one part of field identity still open.
-- Custom shaders for core glow and bloom, camera easing, audio layer.
+- Bloom, camera easing, audio layer.
 
 The Phase 1 renderer interface means all of this touches `render/` only.
 

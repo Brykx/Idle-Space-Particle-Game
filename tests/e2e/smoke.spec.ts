@@ -1,3 +1,4 @@
+import { inflateSync } from 'node:zlib';
 import { expect, test, type Page } from '@playwright/test';
 
 /** Drop a save straight into storage, so a test can start anywhere on the ladder. */
@@ -19,6 +20,68 @@ async function readMass(page: Page): Promise<number> {
   if (!match) throw new Error(`Could not parse mass readout: "${text}"`);
   const [, digits, suffix] = match;
   return Number(digits) * (suffix ? (SUFFIXES[suffix] ?? Number.NaN) : 1);
+}
+
+/**
+ * Just enough PNG to read pixels back: 8-bit, non-interlaced, RGB or RGBA, which is what a
+ * screenshot is. So this only has to inflate the image data and undo the scanline filters.
+ */
+function decodePng(png: Buffer): { width: number; height: number; channels: number; pixels: Buffer } {
+  let width = 0;
+  let height = 0;
+  let channels = 4;
+  const idat: Buffer[] = [];
+
+  for (let at = 8; at < png.length; ) {
+    const length = png.readUInt32BE(at);
+    const type = png.toString('ascii', at + 4, at + 8);
+    const body = png.subarray(at + 8, at + 8 + length);
+    if (type === 'IHDR') {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      if (body[8] !== 8) throw new Error(`expected 8 bits per channel, got ${body[8]}`);
+      if (body[9] === 2) channels = 3;
+      else if (body[9] === 6) channels = 4;
+      else throw new Error(`expected RGB or RGBA, got colour type ${body[9]}`);
+    } else if (type === 'IDAT') {
+      idat.push(body);
+    }
+    at += length + 12;
+  }
+
+  const raw = inflateSync(Buffer.concat(idat));
+  const pixels = Buffer.alloc(width * height * channels);
+  const stride = width * channels;
+
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)] as number;
+    const line = raw.subarray(y * (stride + 1) + 1, y * (stride + 1) + 1 + stride);
+    for (let x = 0; x < stride; x++) {
+      const a = x >= channels ? (pixels[y * stride + x - channels] as number) : 0;
+      const b = y > 0 ? (pixels[(y - 1) * stride + x] as number) : 0;
+      const c = x >= channels && y > 0 ? (pixels[(y - 1) * stride + x - channels] as number) : 0;
+      const value = line[x] as number;
+      let out: number;
+      switch (filter) {
+        case 0: out = value; break;
+        case 1: out = value + a; break;
+        case 2: out = value + b; break;
+        case 3: out = value + ((a + b) >> 1); break;
+        case 4: {
+          const p = a + b - c;
+          const pa = Math.abs(p - a);
+          const pb = Math.abs(p - b);
+          const pc = Math.abs(p - c);
+          out = value + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
+          break;
+        }
+        default: throw new Error(`unknown PNG filter ${filter}`);
+      }
+      pixels[y * stride + x] = out & 0xff;
+    }
+  }
+
+  return { width, height, channels, pixels };
 }
 
 test.describe('the game runs', () => {
@@ -235,5 +298,40 @@ test.describe('the game runs', () => {
     await expect(card.locator('.level')).toHaveText('Lv 1');
     expect(await page.locator('.mass').innerText()).not.toBe('');
     void massBefore;
+  });
+  test('draws the gas giant with its shader, without a compile failure', async ({ page }) => {
+    // A shader that fails to compile does not throw — Pixi warns and the body silently stops
+    // drawing, which no other assertion here would notice. So this watches the console, and
+    // then checks that something is actually on screen where the planet should be.
+    const complaints: string[] = [];
+    page.on('console', (message) => {
+      if (message.type() === 'error' || message.type() === 'warning') complaints.push(message.text());
+    });
+    page.on('pageerror', (error) => complaints.push(String(error)));
+
+    await seedSave(page, { mass: '1e11', totalMassEver: '1e11' });
+    await page.reload();
+    await expect(page.locator('.stage-name')).toHaveText('Gas Giant');
+
+    // Give it real frames: the program is compiled on the first draw, not at construction.
+    await page.waitForTimeout(1500);
+    expect(complaints.filter((text) => /shader|program|glsl|compil/i.test(text))).toEqual([]);
+
+    const box = (await page.locator('canvas').boundingBox()) as { x: number; y: number; width: number; height: number };
+    const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const shot = decodePng(
+      await page.screenshot({ clip: { x: centre.x - 20, y: centre.y - 20, width: 40, height: 40 }, scale: 'css' }),
+    );
+
+    // The lit side of a gas giant is warm and bright; the empty field behind it is neither.
+    // Sampling a patch rather than one pixel keeps a stray particle from deciding the test.
+    let lit = 0;
+    const total = shot.width * shot.height;
+    for (let i = 0; i < total; i++) {
+      const r = shot.pixels[i * shot.channels] as number;
+      const b = shot.pixels[i * shot.channels + 2] as number;
+      if (r > 90 && r > b + 20) lit++;
+    }
+    expect(lit).toBeGreaterThan(total * 0.5);
   });
 });
