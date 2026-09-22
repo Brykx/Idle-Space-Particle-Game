@@ -153,6 +153,57 @@ neutron star → black hole                                                  pas
 Driven by lifetime mass, not current mass, so spending never demotes your core. You built
 those upgrades out of what you caught; the core keeps what it was.
 
+### What a stage controls, and what it should
+
+`StageLook` currently carries three things: a core colour, a particle colour, and a core
+scale. That is enough to tell Dust from Gas Giant at a glance, and not enough to make them
+feel like different places.
+
+Four things are missing, in rough order of how much they'd buy:
+
+**Core form.** Every stage is the same soft glow sprite at a different size and hue. A gas
+giant wants bands, a planet a lit limb and a terminator, a star a corona, a neutron star a
+hard bright point far smaller than the stage before it, a black hole a dark disc with a
+bright ring. This is the single biggest visual gap in the game.
+
+**Particle size.** Fixed at a random 0.55–1.3 for the whole run. Dust should be a fine haze
+of motes barely a pixel across; a supergiant should be hauling in visibly chunky bodies. The
+size range belongs on the stage.
+
+**Orbit character.** Captured particles spawn at 0.12–0.46 × orbital speed with a fixed drag
+of 0.3/s, at every stage, so they spiral in over a couple of seconds from dust to supergiant.
+That is backwards. Early on your gravity is feeble and particles should *loiter* — several
+slow, wide orbits before the drag finally wins. Late on the well is deep and they should fall
+hard and fast. Both the tangential range and the drag coefficient belong on the stage.
+
+**Field density.** Emission is driven by the economy alone. A stage could also widen or narrow
+the band the particles arrive in, so the cloud visibly tightens as the core grows.
+
+The first needs shader work. The other three are extra fields on `StageLook` threaded through
+`FieldRates` — cheap, and they would make the early game read very differently from the late.
+
+### More to buy as you climb
+
+Measured on the current curve: the last new upgrade card — Field Lines, at 1e8 lifetime mass
+— appears about **20 minutes** in. The ladder runs to about **55**. So for the last
+thirty-five minutes the Core tab never changes: the same five cards with bigger numbers on
+them.
+
+The stage ladder tells you that you are growing; the thing you actually interact with does
+not. Two ways to fix it:
+
+- **Second-tier upgrades gated on stages** — a new line that appears at Planet, another at
+  Brown Dwarf, each feeding a term the opening upgrades already feed but from a fresh cost
+  base. Recommended: it reuses the whole upgrades-as-data pipeline, so each one is an entry
+  in `upgrades.ts` and nothing else.
+- **Stage perks** — a one-off choice presented on arrival at each stage. More interesting,
+  much more to author and to balance.
+
+**The constraint either way:** any new multiplicative upgrade adds to the cost-exponent sum,
+and that sum is 0.998 for a reason. A second-tier upgrade must either take over a saturating
+upgrade's share or be tuned so the total still lands near 1. Adding one "because it feels
+good" is precisely how the ×1500 element chain made the game seventy times faster.
+
 ### Why the ladder resets where it does
 
 The physics is mostly honest, and where it isn't, the break is useful.

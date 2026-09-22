@@ -135,6 +135,10 @@ risk table.
 
 Still to do:
 
+- **More to buy as you climb** — the last new upgrade card appears ~20 minutes in and the
+  ladder runs to ~55, so the Core tab is static for the final thirty-five minutes.
+  Second-tier upgrades gated on stages, tuned so the cost-exponent sum stays near 1. See the
+  design doc.
 - **Energy** — a second resource from fusion, with sinks mass cannot buy
 - **Element chain** — H → He → C → O → Fe, gating the star stages, multiplying mass per particle
 - **Magnetic Field** — catches charged particles gravity misses
@@ -151,9 +155,17 @@ different doing it.
 
 ### Phase 4 — Visual pass (~2-3 days)
 
+- **Field identity per stage** — `StageLook` should also carry particle size, orbit character
+  (tangential range and drag) and field width. Today particles are the same size and spiral
+  in the same way from Dust to Supergiant; early stages should have a fine haze that loiters
+  in wide slow orbits, late ones chunky bodies that fall hard. These are extra fields threaded
+  through `FieldRates` rather than shader work, so they can land at any point — pull them
+  forward if visible progress matters more than prestige.
 - **Core surface detail** — the stage ladder gives this a concrete brief: fourteen distinct
   appearances, of which the current build has fourteen colour-and-size variations and nothing
-  else. Bands for the gas giant, a lit limb for the planet, a corona for the star.
+  else. Bands for the gas giant, a lit limb for the planet, a corona for the star, a hard
+  bright point for the neutron star, a dark disc and ring for the black hole. This is the
+  biggest visual gap in the game and it does need shaders.
 - Custom shaders for core glow and bloom, camera easing, audio layer.
 
 The Phase 1 renderer interface means all of this touches `render/` only.
