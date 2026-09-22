@@ -83,7 +83,6 @@ test.describe('the game runs', () => {
   test('round trips a save through the export string', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.getByRole('button', { name: 'Settings' }).click();
-    await page.locator('.settings summary').click();
 
     await page.getByRole('button', { name: 'Export save' }).click();
     const saveString = await page.locator('textarea').inputValue();
@@ -139,7 +138,6 @@ test.describe('the game runs', () => {
     await expect(page.locator('.goal')).toContainText('Gas Giant');
 
     await page.getByRole('button', { name: 'Progress' }).click();
-    await page.locator('.stages summary').click();
     const rows = page.locator('.stages li');
     await expect(rows).toHaveCount(14);
 
@@ -201,7 +199,6 @@ test.describe('the game runs', () => {
     await expect(page.locator('.card .gain').first()).toContainText('%');
 
     await page.getByRole('button', { name: 'Progress' }).click();
-    await page.locator('.achievements summary').click();
     const unlockedBefore = await page.locator('.achievements li.unlocked').count();
 
     await page.locator('.pulse').click();

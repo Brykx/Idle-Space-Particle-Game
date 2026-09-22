@@ -4,11 +4,11 @@
   const { view }: { view: View } = $props();
 </script>
 
-<details class="achievements">
-  <summary>
+<section class="achievements">
+  <h2>
     Achievements
     <span class="count num">{view.achievementsUnlocked}/{view.achievementCount}</span>
-  </summary>
+  </h2>
 
   <p class="bonus">
     Each one multiplies everything by 1.02. Yours are worth
@@ -23,7 +23,7 @@
       </li>
     {/each}
   </ul>
-</details>
+</section>
 
 <style>
   .achievements {
@@ -33,27 +33,16 @@
     padding: 0.5rem 0.7rem 0.7rem;
   }
 
-  summary {
-    cursor: pointer;
-    font-size: 0.8rem;
-    color: var(--dim);
-    list-style: none;
+  h2 {
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
-  }
-
-  summary::-webkit-details-marker {
-    display: none;
-  }
-
-  summary::before {
-    content: '▸ ';
+    margin: 0;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
     color: var(--dimmer);
-  }
-
-  details[open] summary::before {
-    content: '▾ ';
   }
 
   .count {

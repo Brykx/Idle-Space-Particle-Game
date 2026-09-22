@@ -9,8 +9,8 @@
   the point: a supernova is the only way past a star, and the list should say so long before
   the player gets there.
 -->
-<details class="stages">
-  <summary>The ladder</summary>
+<section class="stages">
+  <h2>The ladder</h2>
 
   <ol>
     {#each view.stages as stage (stage.id)}
@@ -28,7 +28,7 @@
     are not: a star does not grow into a neutron star, it runs out of fuel and throws most of
     itself away. That collapse arrives with the supernova.
   </p>
-</details>
+</section>
 
 <style>
   .stages {
@@ -38,24 +38,13 @@
     padding: 0.5rem 0.7rem 0.7rem;
   }
 
-  summary {
-    cursor: pointer;
-    font-size: 0.8rem;
-    color: var(--dim);
-    list-style: none;
-  }
-
-  summary::-webkit-details-marker {
-    display: none;
-  }
-
-  summary::before {
-    content: '▸ ';
+  h2 {
+    margin: 0;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
     color: var(--dimmer);
-  }
-
-  details[open] summary::before {
-    content: '▾ ';
   }
 
   ol {
