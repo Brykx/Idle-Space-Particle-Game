@@ -334,6 +334,106 @@ satellite galaxies. Content here is **challenges** — runs under a restriction 
 repel", "no capture radius", "10x costs") that pay permanent multipliers. Cheap to author,
 high replay, and they exercise systems that already exist.
 
+## Concept: rebased upgrades and what a promotion is worth
+
+*Not built. This is the design for closing the "nothing new to buy after twenty minutes"
+gap, and it starts from an observation that turns out to change the whole shape.*
+
+### Reaching a stage currently gives you nothing
+
+Promotions are cosmetic. The core changes colour and size, the particles change character, a
+banner appears — and your income does not move by a single percent. The ladder tells you that
+you are growing while the thing you interact with does not react at all.
+
+### Density should reset at every stage
+
+The upgrade called *more particles* should go back to zero each time you are promoted, and
+its costs should be **rebased** to the new stage's economy — otherwise, at Supergiant, buying
+two hundred levels from a base of 30 mass costs nothing and the reset means nothing.
+
+Two reasons this is the right upgrade to do it to:
+
+**It says what the visuals now say.** Climbing the ladder makes particles bigger and fewer.
+Density is literally the count. Resetting it at each promotion is the mechanic agreeing with
+the picture: the flow coarsens, and you rebuild it from a new, coarser baseline.
+
+**It turns one static card into a live one at every stage.** Not a new card — the same card,
+mattering again. Twelve times.
+
+### Which forces the interesting part
+
+If Density resets, its contribution stops compounding across the run. It becomes a sawtooth:
+rising inside a stage, dropping at each promotion. Two consequences, and the second is the
+reason this concept is worth writing down.
+
+**A promotion would make your income fall.** Unacceptable on its own. Climbing the ladder must
+never be a punishment.
+
+**The cost-exponent sum would collapse.** Density carries 0.293 of the 0.998 sum. A sawtooth
+contributes almost nothing over the long run, so the sum drops to about 0.71 — well below 1,
+which means the late game stops being exponential and becomes a wall.
+
+Both are fixed by the same thing: **a promotion has to pay.**
+
+### What a promotion is worth, exactly
+
+This is calculable rather than a matter of taste. The ladder spans 17.2 orders of magnitude
+over 11 promotions — about **1.56 orders per stage**. For a per-stage multiplier to carry the
+exponent share Density is giving up:
+
+```
+multiplier = 10 ^ (0.293 × 1.56) = ×2.86
+```
+
+Across the ladder that is ×1.07e5, or 5.0 orders of magnitude — exactly what Density
+contributes today. The swap is clean: the same growth, moved out of a slider you drag and
+into a moment you arrive at.
+
+Round it to **×3 per promotion**, and reaching Planet visibly triples everything.
+
+One judgement call left. At ×2.86 a promotion is roughly neutral — you lose the Density you
+had built and gain about the same back, then get a cheap fresh climb. That is mathematically
+tidy and emotionally flat. Going slightly higher, say ×3.5, makes each promotion a jump you
+can feel, at the cost of pushing the exponent sum above 1 and quickening the late game. Take
+the jump and re-place the stage thresholds afterwards; a promotion that does not feel like a
+reward is a bad promotion, and the balance tool exists precisely so moving thresholds is a
+re-run rather than a guess.
+
+### The same trick rescues the dead upgrades
+
+Gravity Well and Capture Radius feed a capture fraction that saturates towards 1, so they are
+finished about ten minutes in — the cards currently sit there reading `+0.01% income`. If
+capture is rebased per stage as well, on the grounds that a bigger core faces a coarser and
+faster population, both come alive again at every promotion for the same reason Density does.
+
+That is the more ambitious version and it should follow, not lead. Rebasing one upgrade is a
+contained change; rebasing three changes every number in the game at once.
+
+### Genuinely new cards, after that
+
+Rebasing fixes the *pacing* of the Core tab. It does not add variety — it is still five cards.
+New second-tier upgrades, unlocked at stages and feeding the four terms from a fresh cost base,
+are what add that:
+
+| Upgrade | Unlocks at | Feeds | Idea |
+|---|---|---|---|
+| Frame Dragging | Planet | capture | the core's spin drags spacetime, widening the cross-section |
+| Tidal Shear | Brown Dwarf | mass per particle | bodies are torn apart before impact, so less of each escapes |
+| Radiation Pressure | Star | spawn rate | your own light stirs the cloud, sweeping more into reach |
+
+Every one of these adds to the exponent sum, so each must either take share from a tier-one
+upgrade or be tuned small. Adding one because it feels good is exactly how the ×1500 element
+chain once made the game seventy times faster.
+
+### Order of work
+
+1. Per-stage multiplier — a promotion pays ×3. Small, and it makes the ladder mechanical
+   rather than decorative on its own.
+2. Rebase Density, with stage-scaled base costs. The pair above are one change; shipping
+   either alone breaks the curve.
+3. Re-place the stage thresholds against the new curve.
+4. Rebase capture, or add the second-tier cards. Not both at once.
+
 ## Beyond the black hole — the second half of the game
 
 *Vision, not a plan. Nothing below should start before Phase 5 ships and people have actually

@@ -135,10 +135,12 @@ risk table.
 
 Still to do:
 
-- **More to buy as you climb** — the last new upgrade card appears ~20 minutes in and the
-  ladder runs to ~55, so the Core tab is static for the final thirty-five minutes.
-  Second-tier upgrades gated on stages, tuned so the cost-exponent sum stays near 1. See the
-  design doc.
+- **A promotion should pay, and Density should rebase** — the last new upgrade card appears
+  ~20 minutes in and the ladder runs to ~55, and reaching a stage currently moves income by
+  nothing at all. The design is worked out in the design doc: Density resets and rebases at
+  each stage, and a promotion grants x3 to carry the exponent share Density gives up. The two
+  are one change — shipping either alone either makes promotion a punishment or collapses the
+  cost-exponent sum to 0.71 and walls the late game. Second-tier cards follow after.
 - **Achievements, the remaining ~37.** 23 are in. The set is meant to reach about 60.
 - **The iron wall** — iron is already listed as unreachable, but reaching the end of the
   chain does not yet *stall* anything. Making it bite belongs with Phase 3, because a wall
@@ -156,13 +158,9 @@ different doing it.
 
 ### Phase 4 — Visual pass (~2-3 days)
 
-- **Field identity per stage** — `StageLook` gains particle size, particle count, orbit
-  character (tangential range and drag) and field width. The rule that carries the ladder:
-  particles get bigger and fewer as the core climbs, with count falling roughly as the inverse
-  square of size so the lit area stays in a narrow band. Dust is a haze of specks that barely
-  fall; Planet is sparse traffic of individually visible meteors; Supergiant swallows moons.
-  Extra fields threaded through `FieldRates` rather than shader work, so this can land at any
-  point — pull it forward if visible progress matters more than prestige.
+- **Field identity per stage — done.** `StageLook` carries particle size, count, orbit range,
+  drag and lifetime; particles get bigger and fewer as the core climbs, with the lit area
+  rising only 2.6x across the ladder. Field *width* is the one part not done.
 - **Core surface detail** — the stage ladder gives this a concrete brief: fourteen distinct
   appearances, of which the current build has fourteen colour-and-size variations and nothing
   else. Bands for the gas giant, a lit limb for the planet, a corona for the star, a hard
