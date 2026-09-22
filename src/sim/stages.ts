@@ -18,7 +18,18 @@ import { D, type Num } from './numbers';
  * threshold — they arrive with the supernova in Phase 3, not by accretion.
  */
 
+/**
+ * What the core is made of, which decides how it is drawn.
+ *
+ * Solid kinds carry a silhouette and a dark side; luminous ones glow. A single soft gradient
+ * for all fourteen was why the early ladder looked washed — additively blended light cannot
+ * be dark anywhere, so a boulder could never look like a boulder.
+ */
+export type BodyKind = 'mote' | 'rock' | 'world' | 'gas' | 'ember' | 'star' | 'remnant' | 'hole';
+
 export interface StageLook {
+  /** Which family of body this stage is, and therefore how it is rendered. */
+  body: BodyKind;
   /** Packed RGB for the core itself. */
   core: number;
   /** Packed RGB for the particles falling in. */
@@ -80,7 +91,7 @@ export const STAGES: Stage[] = [
     threshold: D(0),
     blurb: 'Grains too light to pull on anything. They stick to each other; they do not fall.',
     analogue: 'a grain of interstellar dust',
-    look: { core: 0x8892a6, particle: 0x9fc6ff, scale: 0.02,
+    look: { body: 'mote', core: 0x8892a6, particle: 0x9fc6ff, scale: 0.02,
       particleSize: 0.3,
       particleCount: 8.0,
       orbit: [0.6, 0.9],
@@ -94,7 +105,7 @@ export const STAGES: Stage[] = [
     threshold: D(100),
     blurb: 'Enough grains to be a thing. Gravity is still a rumour.',
     analogue: 'a handful of gravel',
-    look: { core: 0x9a8f80, particle: 0xb8c8e8, scale: 0.05,
+    look: { body: 'rock', core: 0x9a8f80, particle: 0xb8c8e8, scale: 0.05,
       particleSize: 0.4,
       particleCount: 5.5,
       orbit: [0.55, 0.85],
@@ -108,7 +119,7 @@ export const STAGES: Stage[] = [
     threshold: D(2e3),
     blurb: 'Loose rock, held together by contact rather than by you.',
     analogue: 'a boulder',
-    look: { core: 0xa08b74, particle: 0xc2cfe6, scale: 0.09,
+    look: { body: 'rock', core: 0xa08b74, particle: 0xc2cfe6, scale: 0.09,
       particleSize: 0.55,
       particleCount: 3.4,
       orbit: [0.5, 0.8],
@@ -122,7 +133,7 @@ export const STAGES: Stage[] = [
     threshold: D(4e4),
     blurb: 'A kilometre across. For the first time, what holds you together is your own gravity.',
     analogue: 'a 1 km planetesimal',
-    look: { core: 0xb09070, particle: 0xcdd8ea, scale: 0.14,
+    look: { body: 'rock', core: 0xb09070, particle: 0xcdd8ea, scale: 0.14,
       particleSize: 0.7,
       particleCount: 2.3,
       orbit: [0.45, 0.74],
@@ -136,7 +147,7 @@ export const STAGES: Stage[] = [
     threshold: D(6e5),
     blurb: 'Heavy enough to sweep your own lane of the cloud clean.',
     analogue: 'Ceres',
-    look: { core: 0xbda183, particle: 0xd6dcec, scale: 0.2,
+    look: { body: 'rock', core: 0xbda183, particle: 0xd6dcec, scale: 0.2,
       particleSize: 0.9,
       particleCount: 1.5,
       orbit: [0.4, 0.68],
@@ -150,7 +161,7 @@ export const STAGES: Stage[] = [
     threshold: D(1.5e7),
     blurb: 'Heavy enough to pull yourself round. Gravity has started winning arguments.',
     analogue: 'the Moon',
-    look: { core: 0xc9b193, particle: 0xdde0ee, scale: 0.28,
+    look: { body: 'world', core: 0xc9b193, particle: 0xdde0ee, scale: 0.28,
       particleSize: 1.15,
       particleCount: 0.98,
       orbit: [0.35, 0.62],
@@ -164,7 +175,7 @@ export const STAGES: Stage[] = [
     threshold: D(6e8),
     blurb: 'Rock and metal, settled into layers. The heavy things have sunk to the middle.',
     analogue: 'Earth',
-    look: { core: 0x6fa8dc, particle: 0xbfe0ff, scale: 0.38,
+    look: { body: 'world', core: 0x6fa8dc, particle: 0xbfe0ff, scale: 0.38,
       particleSize: 1.6,
       particleCount: 0.54,
       orbit: [0.3, 0.55],
@@ -178,7 +189,7 @@ export const STAGES: Stage[] = [
     threshold: D(4e10),
     blurb: 'The hydrogen stops escaping. You begin to keep what you catch.',
     analogue: 'Jupiter',
-    look: { core: 0xd9a066, particle: 0xffd9a0, scale: 0.52,
+    look: { body: 'gas', core: 0xd9a066, particle: 0xffd9a0, scale: 0.52,
       particleSize: 2.0,
       particleCount: 0.37,
       orbit: [0.26, 0.48],
@@ -192,7 +203,7 @@ export const STAGES: Stage[] = [
     threshold: D(4e12),
     blurb: 'Thirteen Jupiters. The core is hot enough to burn deuterium — not a star yet, but no longer cold.',
     analogue: '13 Jupiter masses',
-    look: { core: 0xb05a3c, particle: 0xffb98a, scale: 0.64,
+    look: { body: 'ember', core: 0xb05a3c, particle: 0xffb98a, scale: 0.64,
       particleSize: 2.5,
       particleCount: 0.25,
       orbit: [0.22, 0.42],
@@ -206,7 +217,7 @@ export const STAGES: Stage[] = [
     threshold: D(6e14),
     blurb: 'Eighty Jupiters. Hydrogen fusion holds against your own weight. You are a star.',
     analogue: '0.08 solar masses',
-    look: { core: 0xff7a45, particle: 0xffc08a, scale: 0.74,
+    look: { body: 'star', core: 0xff7a45, particle: 0xffc08a, scale: 0.74,
       particleSize: 3.0,
       particleCount: 0.185,
       orbit: [0.18, 0.37],
@@ -220,7 +231,7 @@ export const STAGES: Stage[] = [
     threshold: D(1.2e17),
     blurb: 'Hydrogen to helium, steadily, for a long time. The cloud around you is lit from inside now.',
     analogue: 'the Sun',
-    look: { core: 0xfff3c4, particle: 0xffe6b0, scale: 0.86,
+    look: { body: 'star', core: 0xfff3c4, particle: 0xffe6b0, scale: 0.86,
       particleSize: 3.6,
       particleCount: 0.137,
       orbit: [0.15, 0.32],
@@ -234,7 +245,7 @@ export const STAGES: Stage[] = [
     threshold: D(1.5e19),
     blurb: 'Carbon, oxygen, silicon. Each shell you light burns faster than the last, and iron is waiting.',
     analogue: '20 solar masses',
-    look: { core: 0xffb347, particle: 0xffd0a0, scale: 1,
+    look: { body: 'star', core: 0xffb347, particle: 0xffd0a0, scale: 1,
       particleSize: 4.2,
       particleCount: 0.107,
       orbit: [0.12, 0.28],
@@ -250,7 +261,7 @@ export const STAGES: Stage[] = [
     threshold: null,
     blurb: 'What the supernova left. A fraction of the mass, in a city-sized ball, spinning fast.',
     analogue: '1.4 solar masses',
-    look: { core: 0xdfefff, particle: 0xcfe2ff, scale: 0.12,
+    look: { body: 'remnant', core: 0xdfefff, particle: 0xcfe2ff, scale: 0.12,
       particleSize: 1.2,
       particleCount: 1.1,
       orbit: [0.1, 0.24],
@@ -264,7 +275,7 @@ export const STAGES: Stage[] = [
     threshold: null,
     blurb: 'Past the Tolman-Oppenheimer-Volkoff limit, nothing holds. Not even light leaves.',
     analogue: 'beyond 2.3 solar masses',
-    look: { core: 0x1a1626, particle: 0xd8b8ff, scale: 0.45,
+    look: { body: 'hole', core: 0x1a1626, particle: 0xd8b8ff, scale: 0.45,
       particleSize: 2.0,
       particleCount: 0.6,
       orbit: [0.08, 0.2],

@@ -5,9 +5,10 @@ import {
   Particle,
   ParticleContainer,
   Sprite,
-  Texture,
 } from 'pixi.js';
 import { DEFAULT_TUNING, ParticlePool, type FieldGeometry } from './pool';
+import { LUMINOUS, makeSceneTextures } from './textures';
+import type { BodyKind } from '../sim/stages';
 
 /**
  * The particle field — the only file in the project that imports Pixi.
@@ -38,6 +39,8 @@ export interface FieldRates {
   drag: number;
   /** Seconds before an unabsorbed particle gives up. */
   lifetime: number;
+  /** Which family of body the core is, and therefore how it is drawn. */
+  body: BodyKind;
   /** Maximum live particles. */
   budget: number;
   reducedMotion: boolean;
@@ -59,25 +62,6 @@ const MAX_VISUAL_SPAWN = 260;
  * as broken rather than as sparse — so it always drifts, even when income is a trickle.
  */
 const MIN_VISUAL_SPAWN = 22;
-
-/** A soft radial dot, built once and shared by every sprite in the scene. */
-function makeGlowTexture(size = 128): Texture {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return Texture.WHITE;
-
-  const r = size / 2;
-  const gradient = ctx.createRadialGradient(r, r, 0, r, r, r);
-  gradient.addColorStop(0, 'rgba(255,255,255,1)');
-  gradient.addColorStop(0.25, 'rgba(255,255,255,0.7)');
-  gradient.addColorStop(0.6, 'rgba(255,255,255,0.16)');
-  gradient.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size, size);
-
-  return Texture.from(canvas);
-}
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -164,7 +148,8 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   app.canvas.style.width = '100%';
   app.canvas.style.height = '100%';
 
-  const glow = makeGlowTexture();
+  const textures = makeSceneTextures();
+  const glow = textures.glow;
 
   // --- scene graph -------------------------------------------------------------------
   const stars = new ParticleContainer({ dynamicProperties: {} });
@@ -174,7 +159,9 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     // `scale` is not one of these — size and anchor are baked into `vertex`, so per-frame
     // scale changes need `vertex: true`. Without it the pool's per-particle size variation
     // is uploaded once at build time and every particle renders the same size forever.
-    dynamicProperties: { position: true, color: true, rotation: true, vertex: true, uvs: false },
+    // `uvs` is dynamic so a particle can switch between the soft and hard dot without
+    // rebuilding the pool, which would kill every particle in flight at each promotion.
+    dynamicProperties: { position: true, color: true, rotation: true, vertex: true, uvs: true },
   });
   field.blendMode = 'add';
 
@@ -185,11 +172,18 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   halo.blendMode = 'add';
   halo.tint = INITIAL_PARTICLE;
 
-  const core = new Sprite(glow);
+  // Two core sprites. A stage change swaps the body on one and fades the other out, so the
+  // blend mode can change from additive to normal without the core visibly cutting.
+  const core = new Sprite(textures.body.mote);
   core.anchor.set(0.5);
   core.blendMode = 'add';
 
-  app.stage.addChild(stars, field, halo, core, effects);
+  const corePrevious = new Sprite(textures.body.mote);
+  corePrevious.anchor.set(0.5);
+  corePrevious.blendMode = 'add';
+  corePrevious.alpha = 0;
+
+  app.stage.addChild(stars, field, halo, corePrevious, core, effects);
 
   // --- state -------------------------------------------------------------------------
   const tuning = { ...DEFAULT_TUNING };
@@ -207,6 +201,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     orbit: [0.6, 0.9],
     drag: 0.06,
     lifetime: 26,
+    body: 'mote',
     budget: 1200,
     reducedMotion: false,
   };
@@ -225,6 +220,11 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   const geo: FieldGeometry = { centreX: 0, centreY: 0, spawnRadius: 400, coreRadius: CORE_MIN_RADIUS };
 
   /** Decays to 1; above 1 while a pulse is in flight. */
+  /** 0..1, ramps up after a body change while the previous body fades out. */
+  let bodyBlend = 1;
+  let shownBody: BodyKind = 'mote';
+  let particlesAreHard = false;
+
   let pulseStrength = 1;
   /** 0..1, brightens the core briefly on each absorption. */
   let flash = 0;
@@ -244,7 +244,14 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     field.particleChildren.length = 0;
     sprites = [];
     for (let i = 0; i < capacity; i++) {
-      const p = new Particle({ texture: glow, x: 0, y: 0, anchorX: 0.5, anchorY: 0.5, alpha: 0 });
+      const p = new Particle({
+        texture: particlesAreHard ? textures.particleHard : textures.particleSoft,
+        x: 0,
+        y: 0,
+        anchorX: 0.5,
+        anchorY: 0.5,
+        alpha: 0,
+      });
       p.scaleX = p.scaleY = 0.08;
       sprites.push(p);
       field.addParticle(p);
@@ -281,6 +288,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     geo.spawnRadius = Math.max(220, (Math.hypot(width, height) / 2) * 1.04);
     halo.position.set(geo.centreX, geo.centreY);
     core.position.set(geo.centreX, geo.centreY);
+    corePrevious.position.set(geo.centreX, geo.centreY);
   }
 
   rebuildPool(rates.budget);
@@ -380,15 +388,46 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       sprite.alpha = alpha / Math.sqrt(stretch);
     }
 
+    // A change of body starts a crossfade: the old sprite keeps what it had and fades.
+    if (rates.body !== shownBody) {
+      corePrevious.texture = core.texture;
+      corePrevious.blendMode = core.blendMode;
+      corePrevious.tint = core.tint;
+      core.texture = textures.body[rates.body];
+      core.blendMode = LUMINOUS.has(rates.body) ? 'add' : 'normal';
+      shownBody = rates.body;
+      bodyBlend = 0;
+    }
+    bodyBlend = Math.min(1, bodyBlend + dt * 0.9);
+
+    const wantHard = !LUMINOUS.has(rates.body);
+    if (wantHard !== particlesAreHard) {
+      particlesAreHard = wantHard;
+      const texture = wantHard ? textures.particleHard : textures.particleSoft;
+      for (const sprite of sprites) sprite.texture = texture;
+    }
+
+    const luminous = LUMINOUS.has(shownBody);
+
     // Core: sized by progress, brightened by what it just ate, with a slow idle breath.
     const breath = rates.reducedMotion ? 0 : Math.sin(time * 1.1) * 0.025;
     const coreScale = (geo.coreRadius / 64) * (1 + breath + flash * 0.18);
     core.scale.set(coreScale);
-    core.tint = mixColour(coreTint, 0xffffff, 0.25 + flash * 0.45);
-    core.alpha = 0.85 + flash * 0.15;
+    corePrevious.scale.set(coreScale);
 
-    halo.scale.set(coreScale * 3.4);
-    halo.alpha = 0.16 + flash * 0.2 + shown.scale * 0.12;
+    // Solid bodies keep their own colour. Washing a quarter of white through everything is
+    // what made rock look like fog; only a luminous body should be near-white at rest.
+    core.tint = luminous
+      ? mixColour(coreTint, 0xffffff, 0.3 + flash * 0.4)
+      : mixColour(coreTint, 0xffffff, flash * 0.35);
+    core.alpha = luminous ? 0.85 + flash * 0.15 : bodyBlend;
+    corePrevious.alpha = 1 - bodyBlend;
+
+    // The halo is light, so it belongs to bodies that emit it. A rock gets a hint of dust.
+    halo.scale.set(coreScale * (luminous ? 3.4 : 2.2));
+    halo.alpha = luminous
+      ? 0.16 + flash * 0.2 + shown.scale * 0.12
+      : 0.05 + flash * 0.12;
     halo.tint = particleTint;
 
     for (const ring of rings) {

@@ -161,11 +161,15 @@ different doing it.
 - **Field identity per stage — done.** `StageLook` carries particle size, count, orbit range,
   drag and lifetime; particles get bigger and fewer as the core climbs, with the lit area
   rising only 2.6x across the ladder. Field *width* is the one part not done.
-- **Core surface detail** — the stage ladder gives this a concrete brief: fourteen distinct
-  appearances, of which the current build has fourteen colour-and-size variations and nothing
-  else. Bands for the gas giant, a lit limb for the planet, a corona for the star, a hard
-  bright point for the neutron star, a dark disc and ring for the black hole. This is the
-  biggest visual gap in the game and it does need shaders.
+- **Core surface detail — done, without shaders.** `StageLook` carries a `BodyKind`, and
+  `render/textures.ts` draws one procedural canvas per kind at start-up: cratered irregular
+  rocks, mottled worlds with an atmosphere limb, a banded gas giant with a storm, a dim
+  self-lit ember, a hard star, a spiked neutron remnant, and a black hole that is an actual
+  opaque hole with a ring. Solid kinds draw with normal blending so they occlude the field and
+  can be dark on one side; only luminous kinds keep the additive glow. Remaining here: real
+  shaders would add a moving terminator and specular detail, but the silhouette problem is
+  solved.
+- Field **width** per stage, the one part of field identity still open.
 - Custom shaders for core glow and bloom, camera easing, audio layer.
 
 The Phase 1 renderer interface means all of this touches `render/` only.

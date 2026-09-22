@@ -488,6 +488,7 @@ function createGame() {
       orbit: look.orbit,
       drag: look.drag,
       lifetime: look.lifetime,
+      body: look.body,
       budget: state.settings.particleBudget,
       reducedMotion: state.settings.reducedMotion,
     });

@@ -161,10 +161,14 @@ feel like different places.
 
 Four things are missing, in rough order of how much they'd buy:
 
-**Core form.** Every stage is the same soft glow sprite at a different size and hue. A gas
-giant wants bands, a planet a lit limb and a terminator, a star a corona, a neutron star a
-hard bright point far smaller than the stage before it, a black hole a dark disc with a
-bright ring. This is the single biggest visual gap in the game.
+**Core form — done.** Stages carry a `BodyKind` and each kind is a procedural canvas drawn
+once at start-up. The fix that mattered was not the textures but the blending: the core used
+to be additive, and additive light on a dark background *cannot be dark anywhere*, so a
+boulder could never have a shadowed side however it was drawn. Solid kinds — motes, rocks,
+worlds, gas giants — now draw with normal blending, carrying their silhouette in alpha and
+their lighting in RGB, and occlude the field behind them. Only stars, embers and remnants
+keep the glow, because that is what light actually does. The permanent quarter-of-white wash
+over every core went with it.
 
 **Particle size and count, traded against each other.** This is the one that carries the
 ladder, and it is a single rule rather than two settings:
