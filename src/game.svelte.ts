@@ -617,6 +617,8 @@ function createGame() {
       drag: look.drag,
       lifetime: look.lifetime,
       width: look.width,
+      grain: look.grain,
+      tilt: look.tilt,
       body: look.body,
       budget: state.settings.particleBudget,
       reducedMotion: state.settings.reducedMotion,

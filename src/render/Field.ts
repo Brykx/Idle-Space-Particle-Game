@@ -5,11 +5,12 @@ import {
   Particle,
   ParticleContainer,
   Sprite,
+  type Texture,
 } from 'pixi.js';
 import { createBodies, type Bodies, type BodyState } from './impostor';
 import { DEFAULT_TUNING, ParticlePool, type FieldGeometry } from './pool';
 import { LUMINOUS, makeSceneTextures } from './textures';
-import type { BodyKind } from '../sim/stages';
+import type { BodyKind, GrainKind } from '../sim/stages';
 
 /**
  * The particle field — the only file in the project that imports Pixi.
@@ -42,6 +43,10 @@ export interface FieldRates {
   lifetime: number;
   /** How far out particles are drawn from, as a fraction of the screen's own reach. */
   width: number;
+  /** What a single infalling particle is drawn as. */
+  grain: GrainKind;
+  /** 0 face-on, 1 strongly inclined. Squashes the field into a disc seen from above it. */
+  tilt: number;
   /** Which family of body the core is, and therefore how it is drawn. */
   body: BodyKind;
   /** Maximum live particles. */
@@ -103,6 +108,19 @@ function mixColour(a: number, b: number, t: number): number {
   return (
     (Math.round(lerp(ar, br, t)) << 16) | (Math.round(lerp(ag, bg, t)) << 8) | Math.round(lerp(ab, bb, t))
   );
+}
+
+/**
+ * The sky is generated, not authored, but it should not reshuffle itself every time the
+ * window is resized — a night sky that changes when you drag the corner of the browser stops
+ * being a place. One seeded sequence, restarted on every rebuild.
+ */
+function starRandom(): () => number {
+  let seed = 0x9e3779b9;
+  return () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
 }
 
 /** What the field looks like before the first `setRates` arrives — the dust stage. */
@@ -191,7 +209,21 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   // the same field, drawn less well, rather than no field at all.
   const bodies: Bodies | null = createBodies(app.renderer);
 
-  app.stage.addChild(stars, field, halo, corePrevious, core);
+  /**
+   * An opaque black disc, drawn under the body and over the field.
+   *
+   * A luminous body is additively blended, and additive blending cannot occlude: a meteoroid
+   * passing *behind* a star had the star's light added on top of it and came out as a bright
+   * blob sitting on the star's face. It is the same lesson as "additive light cannot be dark"
+   * arriving from the other side — the body was not too dark, it was too transparent.
+   *
+   * So everything with a surface gets a hole punched for it first, and the light is added
+   * onto that. Dust is the exception, because a cloud genuinely does not occlude.
+   */
+  const occluder = new Graphics();
+  occluder.circle(0, 0, 1).fill(0x000000);
+
+  app.stage.addChild(stars, field, halo, corePrevious, core, occluder);
   if (bodies) app.stage.addChild(bodies.view);
   app.stage.addChild(effects);
 
@@ -212,6 +244,8 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     drag: 0.06,
     lifetime: 26,
     width: 1,
+    grain: 'mote',
+    tilt: 0,
     body: 'mote',
     budget: 1200,
     reducedMotion: false,
@@ -227,6 +261,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     particleSize: rates.particleSize,
     particleCount: rates.particleCount,
     width: rates.width,
+    tilt: rates.tilt,
   };
 
   const geo: FieldGeometry = {
@@ -242,7 +277,27 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   let bodyBlend = 1;
   let shownBody: BodyKind = 'mote';
   let previousBody: BodyKind = 'mote';
-  let particlesAreHard = false;
+
+  /**
+   * Lit bodies are drawn over the field rather than added to it, because a rock has a dark
+   * side and additive light cannot. Motes and grit stay additive: a dust cloud really is
+   * light summing, and that is the stage nobody wanted changed.
+   */
+  const GRAIN_BLEND: Record<GrainKind, 'add' | 'normal'> = {
+    mote: 'add',
+    grit: 'add',
+    rock: 'normal',
+  };
+
+  /** Which atlas frame a given particle gets. Rocks are handed one of four, by index. */
+  function grainTexture(grain: GrainKind, index: number): Texture {
+    if (grain === 'mote') return textures.particles.mote;
+    if (grain === 'grit') return textures.particles.grit;
+    const rocks = textures.particles.rocks;
+    return rocks[index % rocks.length] ?? textures.particles.grit;
+  }
+
+  let shownGrain: GrainKind = 'mote';
 
   let pulseStrength = 1;
   /** 0..1, brightens the core briefly on each absorption. */
@@ -264,7 +319,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     sprites = [];
     for (let i = 0; i < capacity; i++) {
       const p = new Particle({
-        texture: particlesAreHard ? textures.particleHard : textures.particleSoft,
+        texture: grainTexture(shownGrain, i),
         x: 0,
         y: 0,
         anchorX: 0.5,
@@ -278,21 +333,75 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     field.update();
   }
 
+  /**
+   * The night sky.
+   *
+   * It used to be 260 identical dots at one colour and one brightness, which reads as noise
+   * on the lens rather than as a sky. Three things make the difference, and none of them is
+   * more dots:
+   *
+   * **Brightness is a power law.** Real magnitudes go roughly one to two-and-a-half in count
+   * per step down in brightness, so a sky is thousands of near-invisible stars with a few
+   * dozen obvious ones standing out of them. A uniform distribution has no standouts, so the
+   * eye finds no structure and the whole thing reads flat.
+   *
+   * **Colour is temperature.** Stars run blue-white through white and yellow to orange, and
+   * the cool ones are far more common than the hot ones. A single tint is what made the old
+   * field look like dust on a scanner.
+   *
+   * **There is a band.** The galaxy is a disc and we are inside it, so half the sky has
+   * noticeably more stars than the other half, along a line. Tilting that band across the
+   * frame gives the sky an axis, which is the thing that stops it looking like static.
+   *
+   * All of it is static after build: one container, no per-frame work, one draw call.
+   */
   function rebuildStars(): void {
     const { width, height } = app.screen;
     stars.particleChildren.length = 0;
-    const count = rates.reducedMotion ? 120 : 260;
+
+    const count = rates.reducedMotion ? 900 : 1800;
+    const random = starRandom();
+
+    // The galactic band: a line across the frame that stars cluster towards.
+    const bandAngle = -0.42;
+    const bandCos = Math.cos(bandAngle);
+    const bandSin = Math.sin(bandAngle);
+    const bandWidth = Math.min(width, height) * 0.32;
+
     for (let i = 0; i < count; i++) {
+      // A third of the sky is drawn from the band, the rest is scattered evenly.
+      const inBand = random() < 0.34;
+      let x = random() * width;
+      let y = random() * height;
+      if (inBand) {
+        const along = (random() - 0.5) * Math.hypot(width, height);
+        // Two samples averaged: a rough bell, so the band has a dense core and soft edges.
+        const across = ((random() + random()) - 1) * bandWidth;
+        x = width / 2 + bandCos * along - bandSin * across;
+        y = height / 2 + bandSin * along + bandCos * across;
+        if (x < 0 || x > width || y < 0 || y > height) continue;
+      }
+
+      // Magnitude: a steep power law, so most are barely there and a few carry the sky.
+      const magnitude = Math.pow(random(), 3.4);
+      const alpha = 0.05 + magnitude * 0.95;
+
+      // Temperature, weighted towards the cool end the way a real population is.
+      const heat = Math.pow(random(), 1.8);
+      const tint = mixColour(0xffd2a1, 0xcfe0ff, heat);
+
       const p = new Particle({
-        texture: glow,
-        x: Math.random() * width,
-        y: Math.random() * height,
+        texture: textures.particles.star,
+        x,
+        y,
         anchorX: 0.5,
         anchorY: 0.5,
-        alpha: 0.06 + Math.random() * 0.2,
+        alpha,
       });
-      p.scaleX = p.scaleY = 0.006 + Math.random() * 0.015;
-      p.tint = 0xcfe2ff;
+      // The bright ones are bigger, but only a little: a star is a point, and a big soft one
+      // reads as a smudge. The spikes in the texture do the work of making it look bright.
+      p.scaleX = p.scaleY = 0.012 + magnitude * 0.05;
+      p.tint = tint;
       stars.addParticle(p);
     }
     stars.update();
@@ -310,6 +419,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     halo.position.set(geo.centreX, geo.centreY);
     core.position.set(geo.centreX, geo.centreY);
     corePrevious.position.set(geo.centreX, geo.centreY);
+    occluder.position.set(geo.centreX, geo.centreY);
     bodies?.view.position.set(geo.centreX, geo.centreY);
   }
 
@@ -340,6 +450,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     shown.particleSize += (rates.particleSize - shown.particleSize) * k;
     shown.particleCount += (rates.particleCount - shown.particleCount) * k;
     shown.width += (rates.width - shown.width) * k;
+    shown.tilt += (rates.tilt - shown.tilt) * k;
     easeColour(shown.core, rates.coreColour, k);
     easeColour(shown.particle, rates.particleColour, k);
 
@@ -363,6 +474,10 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     // A trail is motion, so reduced motion takes it to nothing — one factor, not a branch.
     const trail = rates.reducedMotion ? 0 : 1;
 
+    // How much the field is flattened on screen. Face-on at Dust, which is the one stage of
+    // the field that was already right.
+    const squash = 1 - shown.tilt * 0.72;
+
     geo.coreRadius = lerp(CORE_MIN_RADIUS, CORE_MAX_RADIUS, shown.scale);
     // Never inside the core itself, whatever a stage asks for.
     geo.spawnRadius = Math.max(geo.coreRadius * 2.5, geo.viewRadius * shown.width);
@@ -385,7 +500,10 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
         continue;
       }
       sprite.x = pool.x[i] as number;
-      sprite.y = pool.y[i] as number;
+      // The simulation runs in the orbital plane and only the projection is tilted, which is
+      // exactly what a circular orbit seen from above its plane looks like: unchanged in one
+      // axis, squashed in the other. Nothing about the physics knows this is happening.
+      sprite.y = geo.centreY + ((pool.y[i] as number) - geo.centreY) * squash;
       sprite.tint = particleTint;
 
       const s = (pool.size[i] as number) * 0.035 * shown.particleSize;
@@ -399,13 +517,26 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
         continue;
       }
 
+      if (shownGrain === 'rock') {
+        // A rock does not smear. Stretching the sprite along its velocity is what a streak
+        // *is*, and it works because a soft dot has no shape to distort — the moment the
+        // sprite has a silhouette, the same trick turns every meteoroid into a lozenge.
+        // So lit bodies keep their outline and tumble instead, which is what they do.
+        sprite.rotation = i * 2.399 + time * (0.15 + (i % 7) * 0.04) * trail;
+        sprite.scaleX = s;
+        sprite.scaleY = s;
+        sprite.alpha = alpha;
+        continue;
+      }
+
       const vx = pool.vx[i] as number;
-      const vy = pool.vy[i] as number;
+      // Screen velocity, not plane velocity: the streak has to lie along the path as drawn,
+      // and the drawn path is the squashed one.
+      const vy = (pool.vy[i] as number) * squash;
       const speed = Math.hypot(vx, vy);
       // A streak is a distance, not a multiple of the body. At the same speed a dust mote
-      // smears across many times its own width while a captured moon barely elongates, so
-      // the stretch is divided by how large the stage draws its particles. Without this the
-      // late ladder is full of enormous lozenges, which is the opposite of heavy.
+      // smears across many times its own width while a heavier grain barely elongates, so
+      // the stretch is divided by how large the stage draws its particles.
       const stretchScale = 1 / Math.max(0.55, shown.particleSize);
       const stretch =
         1 + Math.min(TRAIL_MAX_STRETCH, (speed / TRAIL_SPEED_REF) * trail * stretchScale);
@@ -436,11 +567,13 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     // Slow: a promotion is something you watch happen, not a palette swap.
     bodyBlend = Math.min(1, bodyBlend + dt * 0.55);
 
-    const wantHard = !LUMINOUS.has(rates.body);
-    if (wantHard !== particlesAreHard) {
-      particlesAreHard = wantHard;
-      const texture = wantHard ? textures.particleHard : textures.particleSoft;
-      for (const sprite of sprites) sprite.texture = texture;
+    if (rates.grain !== shownGrain) {
+      shownGrain = rates.grain;
+      field.blendMode = GRAIN_BLEND[shownGrain];
+      for (let i = 0; i < sprites.length; i++) {
+        const sprite = sprites[i];
+        if (sprite) sprite.texture = grainTexture(shownGrain, i);
+      }
     }
 
     const luminous = LUMINOUS.has(shownBody);
@@ -448,6 +581,16 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     // Core: sized by progress, brightened by what it just ate, with a slow idle breath.
     const breath = rates.reducedMotion ? 0 : Math.sin(time * 1.1) * 0.025;
     const coreScale = (geo.coreRadius / 64) * (1 + breath + flash * 0.18);
+
+    // Slightly inside the body's own edge, so the disc never shows as a black rim outside an
+    // antialiased silhouette. A mote has no surface to hide behind, and a body mid-crossfade
+    // is only half there, so the hole fades with it.
+    const solid = shownBody !== 'mote';
+    occluder.visible = solid;
+    if (solid) {
+      occluder.scale.set(coreScale * 120 * 0.96);
+      occluder.alpha = previousBody === 'mote' ? bodyBlend : 1;
+    }
 
     if (bodies) {
       // The sprite bodies fill 94% of a 256px texture, so their drawn radius is 120 * scale.

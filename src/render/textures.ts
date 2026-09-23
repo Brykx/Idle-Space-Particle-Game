@@ -324,9 +324,8 @@ function makeMote(seed: number): Texture {
 
 export interface SceneTextures {
   body: Record<BodyKind, Texture>;
-  /** Soft and hard particle dots, cut from one canvas so the field still batches. */
-  particleSoft: Texture;
-  particleHard: Texture;
+  /** Everything drawn as a sprite, cut from one canvas so the field still batches. */
+  particles: ParticleAtlas;
   glow: Texture;
 }
 
@@ -335,42 +334,179 @@ export interface SceneTextures {
  * Separate canvases would be separate GPU textures, which would break the particle
  * container's batching the moment a stage used the other one.
  */
-function makeParticleAtlas(): { soft: Texture; hard: Texture; glow: Texture } {
-  // 256px cells rather than 128. At the top of the ladder a single infalling body is drawn
-  // tens of pixels across, and half that resolution was being magnified into a smear at
-  // exactly the stages where the particles are meant to read as objects.
-  const cell = 256;
-  const made = canvas2d(cell * 2);
-  if (!made) return { soft: Texture.WHITE, hard: Texture.WHITE, glow: Texture.WHITE };
+/**
+ * Everything drawn as a small sprite, cut from one canvas.
+ *
+ * One source texture, so the particle container still batches into a single draw call no
+ * matter how many kinds of thing are in flight. A separate canvas per variant would be a
+ * separate GPU texture and the batch would break the moment two stages shared the screen.
+ *
+ * The grid is 4 x 2 cells of 256px:
+ *
+ *   mote   grit   star   —
+ *   rock0  rock1  rock2  rock3
+ */
+const ATLAS_CELL = 256;
+
+function atlasCell(column: number, row: number): { x: number; y: number } {
+  return { x: column * ATLAS_CELL, y: row * ATLAS_CELL };
+}
+
+/** A dust mote: no edge at all, just a thickening. The one the early field is made of. */
+function drawMote(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+  const r = ATLAS_CELL / 2;
+  const g = ctx.createRadialGradient(ox + r, oy + r, 0, ox + r, oy + r, r);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.7)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.16)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(ox, oy, ATLAS_CELL, ATLAS_CELL);
+}
+
+/** Grit: a defined grain with a tight halo. Between a mote and a rock. */
+function drawGrit(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+  const r = ATLAS_CELL / 2;
+  const g = ctx.createRadialGradient(ox + r, oy + r, 0, ox + r, oy + r, r);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.34, 'rgba(255,255,255,1)');
+  g.addColorStop(0.4, 'rgba(255,255,255,0.72)');
+  g.addColorStop(0.48, 'rgba(255,255,255,0.26)');
+  g.addColorStop(0.66, 'rgba(255,255,255,0.06)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(ox, oy, ATLAS_CELL, ATLAS_CELL);
+}
+
+/**
+ * A star for the background: a hard point with a short bloom and a pair of faint spikes.
+ *
+ * The bloom has to fall off fast. A star drawn as a soft blob reads as a smudge on the lens;
+ * what makes a night sky look like one is that the bright ones are *points* with a little
+ * light bleeding off them, and the faint ones are almost single pixels.
+ */
+function drawStar(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+  const r = ATLAS_CELL / 2;
+  ctx.save();
+  ctx.translate(ox, oy);
+  ctx.globalCompositeOperation = 'lighter';
+
+  for (const [w, h] of [
+    [ATLAS_CELL * 0.86, ATLAS_CELL * 0.012],
+    [ATLAS_CELL * 0.012, ATLAS_CELL * 0.86],
+  ] as const) {
+    const g = ctx.createLinearGradient(r - w / 2, 0, r + w / 2, 0);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.32)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(r - w / 2, r - h / 2, w, h);
+  }
+
+  const core = ctx.createRadialGradient(r, r, 0, r, r, r * 0.34);
+  core.addColorStop(0, 'rgba(255,255,255,1)');
+  core.addColorStop(0.18, 'rgba(255,255,255,0.95)');
+  core.addColorStop(0.36, 'rgba(255,255,255,0.28)');
+  core.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = core;
+  ctx.fillRect(0, 0, ATLAS_CELL, ATLAS_CELL);
+  ctx.restore();
+}
+
+/**
+ * A meteoroid: an irregular lump, lit from the upper left like everything else on screen.
+ *
+ * This is the piece the late ladder was missing. A supergiant pulling in soft white blobs
+ * reads as fog blowing past; the same stage pulling in lit rocks reads as a system sweeping
+ * up what is left of its own disc. Four variants so a field of them does not look stamped,
+ * handed out per particle through the atlas frame.
+ *
+ * Drawn white-to-black and tinted at draw time, like the bodies, so one set serves every
+ * palette on the ladder.
+ */
+function drawRock(ctx: CanvasRenderingContext2D, ox: number, oy: number, seed: number): void {
+  const random = rng(seed);
+  const r = ATLAS_CELL / 2;
+
+  ctx.save();
+  ctx.translate(ox, oy);
+
+  // Silhouette first, then everything else clipped inside it.
+  blobPath(ctx, r, 0.3, random);
+  ctx.clip();
+
+  // Lit from the upper left, falling to nearly black on the far side. The dark side is the
+  // whole point: an object has one, a glow does not.
+  // Not pure white at the lit end. A rock reflects a few percent of what falls on it, and a
+  // field of them drawn at full brightness reads as confetti rather than as matter.
+  const g = ctx.createLinearGradient(r * 0.3, r * 0.3, r * 1.72, r * 1.78);
+  g.addColorStop(0, '#e6e6e6');
+  g.addColorStop(0.36, '#a8a8a8');
+  g.addColorStop(0.68, '#3a3a3a');
+  g.addColorStop(1, '#0a0a0a');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, ATLAS_CELL, ATLAS_CELL);
+
+  // A few pits, and grain, so the lump has a surface rather than a gradient.
+  craters(ctx, r, 5, random);
+  for (let i = 0; i < 40; i++) {
+    const x = random() * ATLAS_CELL;
+    const y = random() * ATLAS_CELL;
+    ctx.fillStyle = random() < 0.5 ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.14)';
+    ctx.beginPath();
+    ctx.ellipse(x, y, r * 0.09, r * 0.06, random() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  rimLight(ctx, r, 0.22);
+  ctx.restore();
+}
+
+export interface ParticleAtlas {
+  /** The early field: soft, edgeless, many. */
+  mote: Texture;
+  /** The middle: defined grains. */
+  grit: Texture;
+  /** Background stars. */
+  star: Texture;
+  /** The late field: lit irregular bodies, four of them. */
+  rocks: Texture[];
+  /** Soft radial light, reused for the core halo. */
+  glow: Texture;
+}
+
+function makeParticleAtlas(): ParticleAtlas {
+  const made = canvas2d(ATLAS_CELL * 4);
+  if (!made) {
+    const w = Texture.WHITE;
+    return { mote: w, grit: w, star: w, rocks: [w], glow: w };
+  }
   const { canvas, ctx } = made;
-  const r = cell / 2;
 
-  const soft = ctx.createRadialGradient(r, r, 0, r, r, r);
-  soft.addColorStop(0, 'rgba(255,255,255,1)');
-  soft.addColorStop(0.25, 'rgba(255,255,255,0.7)');
-  soft.addColorStop(0.6, 'rgba(255,255,255,0.16)');
-  soft.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = soft;
-  ctx.fillRect(0, 0, cell, cell);
-
-  // The hard variant: a solid body with a tight halo, so a captured rock reads as a rock
-  // rather than as a bright patch of fog. The falloff is short on purpose — a long one is
-  // what made the late ladder look washed.
-  const hard = ctx.createRadialGradient(cell + r, r, 0, cell + r, r, r);
-  hard.addColorStop(0, 'rgba(255,255,255,1)');
-  hard.addColorStop(0.34, 'rgba(255,255,255,1)');
-  hard.addColorStop(0.40, 'rgba(255,255,255,0.72)');
-  hard.addColorStop(0.48, 'rgba(255,255,255,0.26)');
-  hard.addColorStop(0.66, 'rgba(255,255,255,0.06)');
-  hard.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = hard;
-  ctx.fillRect(cell, 0, cell, cell);
+  const mote = atlasCell(0, 0);
+  const grit = atlasCell(1, 0);
+  const star = atlasCell(2, 0);
+  drawMote(ctx, mote.x, mote.y);
+  drawGrit(ctx, grit.x, grit.y);
+  drawStar(ctx, star.x, star.y);
+  for (let i = 0; i < 4; i++) {
+    const at = atlasCell(i, 1);
+    drawRock(ctx, at.x, at.y, 17 + i * 91);
+  }
 
   const source = Texture.from(canvas).source;
+  const frame = (column: number, row: number): Texture =>
+    new Texture({
+      source,
+      frame: new Rectangle(column * ATLAS_CELL, row * ATLAS_CELL, ATLAS_CELL, ATLAS_CELL),
+    });
+
   return {
-    soft: new Texture({ source, frame: new Rectangle(0, 0, cell, cell) }),
-    hard: new Texture({ source, frame: new Rectangle(cell, 0, cell, cell) }),
-    glow: new Texture({ source, frame: new Rectangle(0, 0, cell, cell) }),
+    mote: frame(0, 0),
+    grit: frame(1, 0),
+    star: frame(2, 0),
+    rocks: [frame(0, 1), frame(1, 1), frame(2, 1), frame(3, 1)],
+    glow: frame(0, 0),
   };
 }
 
@@ -387,8 +523,7 @@ export function makeSceneTextures(): SceneTextures {
       remnant: makeRemnant(),
       hole: makeHole(),
     },
-    particleSoft: atlas.soft,
-    particleHard: atlas.hard,
+    particles: atlas,
     glow: atlas.glow,
   };
 }

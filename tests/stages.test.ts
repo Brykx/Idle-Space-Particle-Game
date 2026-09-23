@@ -97,6 +97,13 @@ describe('field identity', () => {
    * freely and the late game is a white blowout; hold it exactly flat and the late game feels
    * no weightier than the early. A gentle rise is the target.
    */
+  /**
+   * Lit area is count x size squared. The bound exists because the early field blends
+   * additively and a rising area there is a white blowout; the late field is lit rocks on
+   * normal blending, where area is occlusion rather than addition and the argument is much
+   * weaker. The monotone half is kept anyway, as a smoothness check: a stage that dips or
+   * spikes against its neighbours is a typo, whatever the blending.
+   */
   it('keeps the lit area in a narrow band, rising only gently', () => {
     const area = (s: (typeof ladder)[number]) => s.look.particleCount * s.look.particleSize ** 2;
     const first = area(ladder[0]!);
