@@ -145,7 +145,13 @@ Still to do:
   Written up in the design doc, including the two numbers the concept got wrong and the bot
   bug the tuning uncovered. Save version 2, with the first migration this project has
   actually run.
-- **Achievements, the remaining ~37.** 23 are in. The set is meant to reach about 60.
+- **Achievements — done, 61 of them.** Landmarks on the ladder, mass milestones, the element
+  chain, the disk, upgrade depth, how you play, and the supernova. Each is worth 2%, so the
+  full set is x3.35 — bounded, which is why it shifts the curve by about ten minutes rather
+  than changing its slope. Measured: Supergiant moved from 1:15 to 1:04.
+
+  `awardAchievements` takes the whole `Rates` now instead of a handful of scalars off it, so
+  a new condition never means changing the signature and every call site with it.
 - **The iron wall** — iron is already listed as unreachable, but reaching the end of the
   chain does not yet *stall* anything. Making it bite belongs with Phase 3, because a wall
   with no way through it is the worst state to leave a player in.

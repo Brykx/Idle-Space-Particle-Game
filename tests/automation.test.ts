@@ -197,8 +197,8 @@ describe('achievements', () => {
     const s = initialState(NOW);
     s.stats.pulses = 1;
 
-    expect(awardAchievements(s, 0.2)).toContain('firstPulse');
-    expect(awardAchievements(s, 0.2)).not.toContain('firstPulse');
+    expect(awardAchievements(s, deriveRates(s))).toContain('firstPulse');
+    expect(awardAchievements(s, deriveRates(s))).not.toContain('firstPulse');
     expect(s.achievements.filter((id) => id === 'firstPulse')).toHaveLength(1);
   });
 

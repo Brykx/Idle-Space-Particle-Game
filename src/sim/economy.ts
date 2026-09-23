@@ -298,13 +298,21 @@ export function runAutoBuyers(s: GameState): number {
 }
 
 /** Unlock anything newly earned. Runs inside `tick`, so an absence can earn them too. */
-export function awardAchievements(s: GameState, captureFraction: number): string[] {
+/**
+ * Takes the whole `Rates` rather than a handful of scalars off it.
+ *
+ * Every context an achievement can read is derived from the same tick's rates, so passing
+ * them whole means adding a condition never means changing this signature and every call
+ * site with it — which is what adding `elementTier` would otherwise have cost.
+ */
+export function awardAchievements(s: GameState, rates: Rates): string[] {
   if (s.achievements.length === ACHIEVEMENTS.length) return [];
 
   const context = {
     state: s,
-    captureFraction,
-    stageIndex: stageIndexFor(s.totalMassEver),
+    captureFraction: rates.captureFraction,
+    stageIndex: rates.stage,
+    elementTier: rates.elementTier,
     autoBuyersOn: autoBuyersOn(s),
     autoBuyersAvailable: autoBuyersAvailable(s),
   };
@@ -365,7 +373,7 @@ export function tick(s: GameState, dt: number): void {
   // tried and measured no better, so the step size is the only real lever — see
   // `sim/offline.ts`, which picks one based on whether automation is running.
   runAutoBuyers(s);
-  awardAchievements(s, rates.captureFraction);
+  awardAchievements(s, rates);
 }
 
 export function pulseReady(s: GameState): boolean {

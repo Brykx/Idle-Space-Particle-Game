@@ -74,15 +74,29 @@ describe('tick', () => {
 });
 
 describe('offline', () => {
-  it('credits the same mass in 36 coarse steps as in 3600 fine ones', () => {
+  /**
+   * Coarse steps must stay close to fine ones, and must never pay *more*.
+   *
+   * This used to assert equality to six decimal places, on the reasoning that without
+   * auto-buyers the rate only changes when an achievement unlocks and that is rare. It is not
+   * rare any more: there are sixty of them, so an hour of catch-up crosses several, and a
+   * coarse step credits the whole hundred seconds at the rate it started with. The measured
+   * gap is under one percent.
+   *
+   * The direction is the part worth asserting. Under-paying an absence is a known, bounded
+   * cost of integrating in steps — the thing Deep Slumber exists to buy back. Over-paying
+   * would mean being away beat being present, which is a different kind of bug entirely.
+   */
+  it('credits a coarse catch-up close to a fine one, and never more', () => {
     const fine = initialState(NOW);
     for (let i = 0; i < 3600; i++) tick(fine, 1);
 
     const coarse = initialState(NOW);
     for (let i = 0; i < 36; i++) tick(coarse, 100);
 
-    const ratio = fine.mass.div(coarse.mass).toNumber();
-    expect(ratio).toBeCloseTo(1, 6);
+    const ratio = coarse.mass.div(fine.mass).toNumber();
+    expect(ratio).toBeLessThanOrEqual(1);
+    expect(ratio).toBeGreaterThan(0.97);
   });
 
   it('caps a long absence and says so', () => {
