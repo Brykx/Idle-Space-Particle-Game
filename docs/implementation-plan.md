@@ -86,7 +86,7 @@ Shipped: 39 unit tests, 7 browser smoke tests, and a pacing report wired into CI
 went through three passes before the curve held its shape — see the balance section of the
 design doc.
 
-### Phase 2 — Depth and automation ← *in progress*
+### Phase 2 — Depth and automation — **done**
 
 **Stage ladder — done.** Fourteen stages from dust to black hole, driven by lifetime mass,
 each with its own core appearance that the renderer morphs between. It replaces the milestone
@@ -189,7 +189,7 @@ Still open here: the second prestige (Act IV) is Phase 5, and the Neutron Star a
 stages remain unreachable by play — the remnant is shown for six seconds after a collapse,
 which is the only place that body appears in the game.
 
-### Phase 4 — Visual pass (~2-3 days)
+### Phase 4 — Visual pass — **mostly done**
 
 - **Field identity per stage — done.** `StageLook` carries particle size, count, orbit range,
   drag and lifetime; particles get bigger and fewer as the core climbs, with the lit area
@@ -248,33 +248,113 @@ which is the only place that body appears in the game.
   fade-in was computed against the stage's `lifetime` rather than against the particle's own,
   which is a *negative* alpha for the three in ten that draw a longer life than average. They
   had been invisible for their first seconds since the pool was written.
-- Bloom, camera easing, audio layer.
+- **A field that reads as a system — done.** `StageLook` carries a `grain` and a `tilt`.
+  Grain decides what a single particle *is*: motes for dust, grit through the rocky middle,
+  lit irregular meteoroids from Protoplanet up, drawn with normal blending so they have a
+  dark side. Tilt flattens the field from face-on at Dust towards a disc seen from above its
+  plane — the simulation still runs in the orbital plane and only the projection is squashed,
+  which is exactly what a circular orbit looks like from an angle.
+
+  The size-and-count ladder was rebalanced with it. The first pass took "bigger and fewer"
+  far too far, and that was invisible while the sprites were white dots: a solar system does
+  not read as a star surrounded by moons, it reads as a large central body and small traffic.
+
+  Two things it exposed. Stretching a sprite along its velocity is what a streak *is*, and it
+  works only because a soft dot has no shape to distort — lit bodies now keep their outline
+  and tumble. And additive blending cannot occlude, so a meteoroid passing behind a star had
+  the star's light added on top of it; everything with a surface now has an opaque hole
+  punched for it first.
+- **A night sky — done.** ~1800 stars with a power-law magnitude distribution, colour by
+  temperature weighted towards the cool end, and a galactic band tilted across the frame. The
+  old version was 260 identical dots at one brightness, which reads as noise on a lens. None
+  of the three fixes is "more dots", and the reasoning is in `visual-design.md`. Seeded, so a
+  resize does not reshuffle the constellations; static after build, one draw call.
+- Remaining visual work is catalogued in `visual-design.md` rather than listed here, because
+  it stopped being a to-do list and became a set of choices with costs against them. The
+  short version: depth sorting across the disc, the core acting as the light source, a real
+  supernova sequence, and a slow zoom out as the core climbs. Bloom is explicitly **not** on
+  the list — see the direction section of that document for why.
 
 The Phase 1 renderer interface means all of this touches `render/` only.
 
-**Done when:** the moment the core ignites is worth recording.
+**Done when:** the moment the core ignites is worth recording. *Not yet true — the supernova
+is currently a six-second remnant and a banner, and that is the one moment in the game that
+should be worth recording.*
 
-### Phase 5 — Black hole + challenges (~3 days)
-Second prestige, Hawking radiation, jets, time dilation, lensing shader, the challenge
-framework, endgame content.
+---
 
-### Phase 6 — Ship (~2 days)
-Balance pass driven by `tools/balance.ts`, mobile layout, PWA, performance profiling on a
-real low-end device, README and screenshots. The Playwright smoke suite landed in Phase 1 and
-has grown with each phase since.
+## The plan, re-examined
 
-### Phase 7 — The Bounce and the second half (vision only)
+*Phases 1 to 3 shipped roughly as written. The order of what is left no longer does, and it is
+worth saying why rather than quietly renumbering.*
+
+**The game is releasable now.** The risk table below has said since the beginning that it is
+releasable from the end of Phase 3, and Phase 3 has shipped: there is a first run of about an
+hour, a supernova, a permanent tree, sixty-one achievements and a second run that is three
+times faster. That is a complete idle game.
+
+**It is not playable, though, because there is no phone layout.** The genre lives on phones —
+it is a game you leave running and glance at, which is a description of a phone. Every hour
+spent on a second prestige before that is an hour spent on content for players who cannot
+reach the first.
+
+**So shipping moves ahead of the black hole.** What was Phase 6 becomes Phase 5, and what was
+Phase 5 becomes Phase 6. Nothing else changes.
+
+There is a second, smaller reversal. The old Phase 5 bundled "second prestige" with
+"challenges". Those are not one thing: the second prestige is the *content* the ladder's last
+two stages exist for, and challenges are a retention mechanic for players who have exhausted
+it. Splitting them means the black hole can ship without waiting for a framework nobody has
+asked for yet.
+
+### Phase 5 — Ship (~3 days)
+
+- **Mobile layout.** The one blocking item. Field above, panel below, tabs as a bottom bar.
+  The renderer already resizes; it is the panel that has never been asked to be narrow.
+- **Performance on a real low-end device**, not on a desktop with the profiler open. The
+  particle budget slider exists for this and has never been tested against a phone.
+- **Balance pass** driven by `tools/balance.ts`, now that the promotion multiplier, the
+  rebase, the achievement set and the prestige tree all interact.
+- **PWA**, so it survives being added to a home screen and closed.
+- README and screenshots.
+
+**Done when:** someone can play it on a phone on a train without being told how.
+
+### Phase 6 — The black hole (~3 days)
+
+Second prestige. Accrete past the TOV limit, reset Stardust for Singularities, and unlock
+*mechanics* rather than numbers: Hawking radiation as offline income, relativistic jets as an
+active layer that is not clicking, time dilation as a literal simulation-speed multiplier, and
+the lensing shader — which is worth much more now that there is a real starfield behind it to
+bend.
+
+This is also what finally makes the Neutron Star and Black Hole stages reachable by playing.
+They have shaders and nobody can get to them; the collapse shows the remnant for six seconds
+and that is the entire appearance of two of the fourteen bodies.
+
+**Done when:** the second prestige changes how the game is played, not how fast.
+
+### Phase 7 — Challenges (~2 days)
+
+Restricted runs with their own rewards — no auto-buyers, no energy, a hard time limit. Cheap
+to build on top of the existing state, because a challenge is a flag plus a predicate over
+`deriveRates`, and the economy is pure.
+
+Deliberately after the black hole: challenges are what you give a player who has finished
+everything, and there is currently no "everything" to have finished.
+
+### Phase 8 — The Bounce and the second half (vision only)
 
 A third prestige that ends the inward game and starts an outward one: the core's interior
 becomes a Big Bang, and the universe it seeds grows life at the Planet stage, up a Kardashev
 ladder to a galactic civilisation. The currency it grants is not a multiplier but the physical
 constants of the next universe.
 
-Written up in the design doc. **Not scheduled**, and not to be started before Phase 5 ships
-and people have played the first half — it is larger than Acts I to V put together. It is
-recorded now so the first half is built without closing the door on it, which mostly means
-keeping what is already true: ladders as data, the renderer behind an interface, and an
-economy with no DOM in it.
+Written up in the design doc. **Not scheduled**, and not to be started before the black hole
+ships and people have played the first half — it is larger than everything before it put
+together. It is recorded now so the first half is built without closing the door on it, which
+mostly means keeping what is already true: ladders as data, the renderer behind an interface,
+and an economy with no DOM in it.
 
 ## Testing strategy
 
@@ -309,6 +389,27 @@ gets looked at by a human, which is the honest way to test a particle field.
 
 ## What is open
 
-Phases 2 through 6, in the order above. The game is releasable from the end of Phase 3; the
-three items most worth doing next are the two reported from play — second-tier upgrades so
-the Core tab keeps changing, and per-stage particle character — and then the supernova.
+Phases 5 through 8, in the order above, plus the tail of Phase 4.
+
+The game is complete enough to release: a first run of about an hour, a supernova that pays,
+a permanent tree, sixty-one achievements, and a second run three times faster. What it is
+missing is not content.
+
+**The one blocking item is a mobile layout.** Everything else on the list is an improvement to
+a game people can already play; that one decides whether they can play it at all.
+
+After it, in order: depth sorting across the disc (`visual-design.md` F1), a real supernova
+sequence (B5), the core acting as the light source (L1), then the black hole.
+
+Two things are designed and not built, and both are recorded rather than forgotten:
+
+- **Second-tier upgrades** — Frame Dragging, Tidal Shear, Radiation Pressure. The Core tab
+  stops changing about twenty minutes in, and rebasing Density fixed its *pacing* without
+  adding any variety. Each one adds to the cost-exponent sum, so each must take share from a
+  tier-one upgrade or be tuned small.
+- **Capture is finished by design and the cards say so.** Gravity Well and Capture Radius
+  read `+0.00% income` for most of a run. Rebasing them was considered and rejected — capture
+  is bounded at 1, so resetting it costs a fixed ~4x at every promotion and the promotion
+  multiplier would have to be inflated by the same 4x to cancel it. Two large numbers whose
+  visible net effect is what you would get from neither is bookkeeping, not a mechanic. The
+  honest reading is that capture is an *onboarding* term: bounded, front-loaded, finished.

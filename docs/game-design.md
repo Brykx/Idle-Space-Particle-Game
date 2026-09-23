@@ -364,6 +364,10 @@ satellite galaxies. Content here is **challenges** — runs under a restriction 
 repel", "no capture radius", "10x costs") that pay permanent multipliers. Cheap to author,
 high replay, and they exercise systems that already exist.
 
+> **Visual direction lives in `visual-design.md`** — whether the game is minimalist or
+> physically grounded, the principles that have held, and a costed catalogue of what could be
+> built next. This document is the economy and the fiction.
+
 ## Rebased upgrades and what a promotion is worth
 
 *Built. The concept below survived contact with the balance tool; two of its numbers did
