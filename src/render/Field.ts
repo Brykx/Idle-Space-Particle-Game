@@ -186,6 +186,25 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   });
   field.blendMode = 'add';
 
+  /**
+   * The few particles that are in front of the core rather than behind it.
+   *
+   * Everything used to pass behind, which is why a tilted disc read as a halo: a ring has a
+   * near half that crosses the body, and without it the field is a glow around the core
+   * rather than something orbiting it.
+   *
+   * Doing it properly would mean every sprite existing in both layers and swapping each
+   * frame, which doubles the upload for a distinction nobody can see. A particle in front of
+   * empty space looks identical either way — **only the ones overlapping the core matter** —
+   * and at any moment that is a handful. So this is a small fixed pool, filled each frame
+   * from whichever particles are both on the near side and over the body.
+   */
+  const fieldFront = new ParticleContainer({
+    dynamicProperties: { position: true, color: true, rotation: true, vertex: true, uvs: true },
+  });
+  const FRONT_SLOTS = 96;
+  let frontSprites: Particle[] = [];
+
   const effects = new Container();
 
   const halo = new Sprite(glow);
@@ -225,7 +244,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
 
   app.stage.addChild(stars, field, halo, corePrevious, core, occluder);
   if (bodies) app.stage.addChild(bodies.view);
-  app.stage.addChild(effects);
+  app.stage.addChild(fieldFront, effects);
 
   // --- state -------------------------------------------------------------------------
   const tuning = { ...DEFAULT_TUNING };
@@ -331,6 +350,23 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       field.addParticle(p);
     }
     field.update();
+
+    fieldFront.particleChildren.length = 0;
+    frontSprites = [];
+    for (let i = 0; i < FRONT_SLOTS; i++) {
+      const p = new Particle({
+        texture: grainTexture(shownGrain, i),
+        x: 0,
+        y: 0,
+        anchorX: 0.5,
+        anchorY: 0.5,
+        alpha: 0,
+      });
+      p.scaleX = p.scaleY = 0.04;
+      frontSprites.push(p);
+      fieldFront.addParticle(p);
+    }
+    fieldFront.update();
   }
 
   /**
@@ -440,6 +476,36 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   const onTap = (): void => options.onPulse();
   app.stage.on('pointertap', onTap);
 
+  /**
+   * Move a particle into the front layer if it is crossing the body on the near side.
+   *
+   * Copies the sprite rather than reassigning it, because a `ParticleContainer`'s membership
+   * is fixed at build time — and hides the original, so it is the same particle in one place
+   * rather than two. Returns the next free front slot.
+   */
+  function promote(sprite: Particle, used: number, crossing: number): number {
+    if (crossing <= 0 || used >= frontSprites.length) return used;
+    if (sprite.alpha <= 0) return used;
+
+    const dy = sprite.y - geo.centreY;
+    // Below centre is the near half of a plane seen from above.
+    if (dy <= 0) return used;
+    const dx = sprite.x - geo.centreX;
+    if (dx * dx + dy * dy > crossing * crossing) return used;
+
+    const front = frontSprites[used];
+    if (!front) return used;
+    front.x = sprite.x;
+    front.y = sprite.y;
+    front.tint = sprite.tint;
+    front.rotation = sprite.rotation;
+    front.scaleX = sprite.scaleX;
+    front.scaleY = sprite.scaleY;
+    front.alpha = sprite.alpha;
+    sprite.alpha = 0;
+    return used + 1;
+  }
+
   // --- frame -------------------------------------------------------------------------
   function frame(dt: number): void {
     time += dt;
@@ -491,6 +557,17 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     pulseStrength = 1 + (pulseStrength - 1) * Math.max(0, 1 - dt * 2.6);
 
     // Sync physics -> sprites. One pass, no allocation.
+    //
+    // A particle is in front of the core when it is on the near side of the disc — which, for
+    // a plane we are looking down onto, is the half drawn below centre — and close enough to
+    // overlap the body. Anywhere else the layer it sits in makes no visible difference, so it
+    // stays in the cheap one.
+    //
+    // The test scales with the tilt: face-on there is no near half to speak of, and Dust is
+    // face-on, which is the one stage of the field that was already right.
+    const crossing = shown.tilt > 0.08 ? geo.coreRadius * 1.35 : 0;
+    let frontUsed = 0;
+
     const n = pool.capacity;
     for (let i = 0; i < n; i++) {
       const sprite = sprites[i];
@@ -526,6 +603,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
         sprite.scaleX = s;
         sprite.scaleY = s;
         sprite.alpha = alpha;
+        frontUsed = promote(sprite, frontUsed, crossing);
         continue;
       }
 
@@ -548,6 +626,13 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       // energy conservation (alpha / stretch) makes the fast ones vanish, which is the
       // opposite of the point, so this splits the difference.
       sprite.alpha = alpha / Math.sqrt(stretch);
+      frontUsed = promote(sprite, frontUsed, crossing);
+    }
+
+    // Anything not claimed this frame is parked.
+    for (let i = frontUsed; i < frontSprites.length; i++) {
+      const spare = frontSprites[i];
+      if (spare) spare.alpha = 0;
     }
 
     // A change of body starts a crossfade. The sprite path also swaps textures here, since
@@ -570,8 +655,13 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     if (rates.grain !== shownGrain) {
       shownGrain = rates.grain;
       field.blendMode = GRAIN_BLEND[shownGrain];
+      fieldFront.blendMode = GRAIN_BLEND[shownGrain];
       for (let i = 0; i < sprites.length; i++) {
         const sprite = sprites[i];
+        if (sprite) sprite.texture = grainTexture(shownGrain, i);
+      }
+      for (let i = 0; i < frontSprites.length; i++) {
+        const sprite = frontSprites[i];
         if (sprite) sprite.texture = grainTexture(shownGrain, i);
       }
     }

@@ -121,7 +121,7 @@ Costs are rough: **S** is an afternoon, **M** is a day or two, **L** is a week o
 
 | # | Idea | Cost | Buys | Verdict |
 |---|---|---|---|---|
-| F1 | **Depth sorting across the disc** — particles on the near half of the orbit draw *in front* of the body, the far half behind | M | The single biggest remaining win for "this is a system". Right now everything passes behind, so the disc reads as a halo rather than a ring | **Do it.** Two containers, membership chosen at spawn by the sign of plane-y |
+| F1 | ~~**Depth sorting across the disc**~~ — **done** | S | The disc reads as a ring rather than a halo, and a body crossing a star is a dark transit | Built. Not two full layers: a particle in front of empty space looks identical either way, so only the ones overlapping the core are promoted, into a fixed pool of 96. Costs nothing measurable |
 | F2 | **A visible orbital plane** — a very faint elliptical haze in the disc plane | S | Makes the inclination explicit rather than implied | Do it, at low alpha. Risk: looks like a UI ring if too crisp |
 | F3 | **Impact flashes** — a brief bloom where a particle is absorbed | S | The moment of capture currently has no punctuation | Do it, tiny and warm. It is the one effect that carries information: *that* is where your mass came from |
 | F4 | **Tails on infalling ice** — comet-like, pointing away from the star | M | Beautiful, and real: sublimation drives a tail anti-sunward | Later. Only makes sense once bodies have composition |
@@ -200,8 +200,8 @@ Costs are rough: **S** is an afternoon, **M** is a day or two, **L** is a week o
 
 ## 4. If I had to order it
 
-1. **U1, mobile layout.** Not a visual choice. The platform.
-2. **F1, depth sorting.** The disc becomes a ring instead of a halo.
+1. ~~**F1, depth sorting.**~~ Done — the disc is a ring, and transits happen.
+2. **U1, mobile layout.** Not a visual choice. The platform.
 3. **B5, the supernova sequence.** The biggest moment has the least made of it.
 4. **L1, the core as light source.** The largest coherence win available.
 5. **C1, slow zoom.** The best answer to late-game scale.
