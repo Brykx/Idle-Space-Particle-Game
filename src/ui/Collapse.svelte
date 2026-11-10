@@ -32,8 +32,8 @@
       {#if armed}
         <p class="cost">
           You will lose your mass, your energy, every upgrade level and your place on the
-          ladder. You keep your achievements, your stardust, and the upgrades you have
-          automated.
+          ladder. You keep your achievements, your stardust, and every current you have
+          opened.
         </p>
         <div class="actions">
           <button class="go" onclick={() => { game.collapse(); armed = false; }}>Collapse the star</button>

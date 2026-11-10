@@ -38,18 +38,6 @@
   });
 </script>
 
-<svelte:window
-  onkeydown={(event) => {
-    // Space fires a pulse, unless the player is typing into the save box.
-    const target = event.target as HTMLElement | null;
-    const typing = target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT';
-    if (event.code === 'Space' && !typing) {
-      event.preventDefault();
-      game.pulse();
-    }
-  }}
-/>
-
 <main>
   <section class="stage">
     <!-- The field is decorative: it renders the numbers, it never produces them. -->
@@ -58,19 +46,6 @@
     <div class="readout">
       <p class="mass num">{view.mass}</p>
       <p class="rate num">+{view.massPerSecond} <span>mass/s</span></p>
-    </div>
-
-    <div class="controls">
-      <button class="pulse" disabled={!view.pulseReady} onclick={() => game.pulse()}>
-        {#if view.pulseReady}
-          <strong>Gravity Pulse</strong>
-          <span class="num">+{view.pulseYield}</span>
-        {:else}
-          <strong>Recharging</strong>
-          <span class="num">{view.pulseCooldown.toFixed(1)}s</span>
-        {/if}
-      </button>
-      <p class="hint">Click the field or press space</p>
     </div>
 
     {#if view.announceTitle}
@@ -225,58 +200,6 @@
   .rate span {
     color: var(--dimmer);
     font-size: 0.75rem;
-  }
-
-  .controls {
-    position: absolute;
-    bottom: 1.5rem;
-    left: 50%;
-    transform: translateX(-50%);
-    text-align: center;
-    width: min(16rem, 80%);
-  }
-
-  .pulse {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.8rem;
-    padding: 0.6rem 0.9rem;
-    border-radius: 9px;
-    border: 1px solid var(--line-strong);
-    background: rgba(18, 30, 58, 0.72);
-    backdrop-filter: blur(6px);
-    transition: background 120ms ease, transform 80ms ease;
-  }
-
-  .pulse strong {
-    font-size: 0.85rem;
-    font-weight: 600;
-  }
-
-  .pulse .num {
-    font-size: 0.8rem;
-    color: var(--warm);
-  }
-
-  .pulse:hover:not(:disabled) {
-    background: rgba(34, 54, 100, 0.85);
-  }
-
-  .pulse:active:not(:disabled) {
-    transform: scale(0.98);
-  }
-
-  .pulse:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .hint {
-    margin: 0.45rem 0 0;
-    font-size: 0.7rem;
-    color: var(--dimmer);
   }
 
   .announce {

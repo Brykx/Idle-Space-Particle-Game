@@ -23,8 +23,10 @@ export interface AchievementContext {
   state: GameState;
   captureFraction: number;
   stageIndex: number;
-  autoBuyersOn: number;
-  autoBuyersAvailable: number;
+  /** Currents that are open and not being held back. */
+  flowing: number;
+  /** Currents begun at least once, ever. */
+  open: number;
   /** Where the element chain has got to. 0 is plain hydrogen. */
   elementTier: number;
 }
@@ -53,24 +55,6 @@ const stageAtLeast = (index: number) => (c: AchievementContext) => c.stageIndex 
 const massAtLeast = (amount: string) => (c: AchievementContext) => c.state.totalMassEver.gte(D(amount));
 
 export const ACHIEVEMENTS: Achievement[] = [
-  {
-    id: 'firstPulse',
-    name: 'Nudge',
-    how: 'Fire a Gravity Pulse',
-    test: (c) => c.state.stats.pulses >= 1,
-  },
-  {
-    id: 'pulse50',
-    name: 'Percussive Maintenance',
-    how: 'Fire 50 Gravity Pulses',
-    test: (c) => c.state.stats.pulses >= 50,
-  },
-  {
-    id: 'pulse500',
-    name: 'Compulsive',
-    how: 'Fire 500 Gravity Pulses',
-    test: (c) => c.state.stats.pulses >= 500,
-  },
   {
     id: 'firstBuy',
     name: 'Shopping',
@@ -157,15 +141,15 @@ export const ACHIEVEMENTS: Achievement[] = [
   },
   {
     id: 'delegation',
-    name: 'Delegation',
-    how: 'Switch on an auto-buyer',
-    test: (c) => c.autoBuyersOn >= 1,
+    name: 'Let It Run',
+    how: 'Open a current and leave it to flow',
+    test: (c) => c.flowing >= 1,
   },
   {
     id: 'handsOff',
     name: 'Hands Off',
-    how: 'Switch on every auto-buyer you have unlocked (all five)',
-    test: (c) => c.autoBuyersAvailable >= UPGRADE_IDS.length && c.autoBuyersOn >= UPGRADE_IDS.length,
+    how: 'Have every current there is open and flowing at once',
+    test: (c) => c.open >= UPGRADE_IDS.length && c.flowing >= UPGRADE_IDS.length,
   },
   {
     id: 'absentLandlord',
@@ -176,8 +160,8 @@ export const ACHIEVEMENTS: Achievement[] = [
   {
     id: 'longWeekend',
     name: 'Long Weekend',
-    how: 'Stay away long enough to cap offline accretion',
-    test: (c) => c.state.stats.longestAway >= 12 * 3600,
+    how: 'Come back after two days away',
+    test: (c) => c.state.stats.longestAway >= 48 * 3600,
   },
   {
     id: 'stillHere',
@@ -345,20 +329,14 @@ export const ACHIEVEMENTS: Achievement[] = [
   {
     id: 'someHelp',
     name: 'Some Help',
-    how: 'Have three auto-buyers running at once',
-    test: (c) => c.autoBuyersOn >= 3,
+    how: 'Have three currents flowing at once',
+    test: (c) => c.flowing >= 3,
   },
   {
     id: 'reserved',
     name: 'Saving Up',
-    how: 'Hold back half your mass from the auto-buyers',
+    how: 'Hold back half your mass from the currents',
     test: (c) => c.state.settings.autoBuyReserve >= 0.5,
-  },
-  {
-    id: 'pulse5000',
-    name: 'It Is A Button, Technically',
-    how: 'Fire 5,000 Gravity Pulses',
-    test: (c) => c.state.stats.pulses >= 5000,
   },
   {
     id: 'sixHours',

@@ -2,7 +2,7 @@ import { D, type Notation, type Num } from './numbers';
 import { UPGRADE_IDS, type UpgradeId } from './upgrades';
 import { STARDUST_IDS, type StardustId } from './prestige';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export interface Settings {
   notation: Notation;
@@ -19,7 +19,6 @@ export interface Settings {
 export interface Stats {
   /** Wall-clock ms when this save was first created. */
   startedAt: number;
-  pulses: number;
   purchases: number;
   /** Longest single absence, in seconds. Achievements read it; nothing else does. */
   longestAway: number;
@@ -47,8 +46,6 @@ export interface GameState {
   levelsEver: Record<UpgradeId, number>;
   /** Seconds of simulated time. The sim's only clock — no wall clock in here. */
   playTime: number;
-  /** `playTime` at which Gravity Pulse becomes available again. */
-  pulseReadyAt: number;
   /** Highest stage the player has been told about, so each one announces itself once. */
   stageSeen: number;
   /**
@@ -59,7 +56,12 @@ export interface GameState {
    * applied twice and cannot be missed across a reload.
    */
   rebasedStage: number;
-  /** Which upgrades buy themselves. Unlocking is derived from level, so it is not stored. */
+  /**
+   * Which currents are allowed to flow. True unless the player is holding one back.
+   *
+   * It says nothing about whether a current has been *opened* — that is derived from
+   * `levelsEver`, so it is not stored twice. A current flows when it is both.
+   */
   autoBuy: Record<UpgradeId, boolean>;
   /** Ids of unlocked achievements. Survive a collapse; they record what you did. */
   achievements: string[];
@@ -78,8 +80,6 @@ export interface GameState {
   stats: Stats;
 }
 
-export const PULSE_COOLDOWN = 10;
-
 export function initialState(now = Date.now()): GameState {
   const levels = {} as Record<UpgradeId, number>;
   const levelsEver = {} as Record<UpgradeId, number>;
@@ -89,7 +89,8 @@ export function initialState(now = Date.now()): GameState {
   for (const id of UPGRADE_IDS) {
     levels[id] = 0;
     levelsEver[id] = 0;
-    autoBuy[id] = false;
+    // Flowing is the default. Holding a current back is the exception you opt into.
+    autoBuy[id] = true;
   }
 
   return {
@@ -101,7 +102,6 @@ export function initialState(now = Date.now()): GameState {
     levels,
     levelsEver,
     playTime: 0,
-    pulseReadyAt: 0,
     stageSeen: 0,
     rebasedStage: 0,
     autoBuy,
@@ -119,7 +119,6 @@ export function initialState(now = Date.now()): GameState {
     },
     stats: {
       startedAt: now,
-      pulses: 0,
       purchases: 0,
       longestAway: 0,
       exports: 0,
@@ -136,8 +135,12 @@ export function cloneState(s: GameState): GameState {
     energy: D(s.energy),
     totalEnergyEver: D(s.totalEnergyEver),
     levels: { ...s.levels },
+    levelsEver: { ...s.levelsEver },
     autoBuy: { ...s.autoBuy },
     achievements: [...s.achievements],
+    stardust: D(s.stardust),
+    stardustEver: D(s.stardustEver),
+    stardustLevels: { ...s.stardustLevels },
     settings: { ...s.settings },
     stats: { ...s.stats },
   };

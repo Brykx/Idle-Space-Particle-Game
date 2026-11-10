@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { D } from '../src/sim/numbers';
-import { initialState, type GameState } from '../src/sim/state';
-import { autoBuyUnlocked, deriveRates, tick } from '../src/sim/economy';
+import { SAVE_VERSION, initialState, type GameState } from '../src/sim/state';
+import { deriveRates, isOpen, tick } from '../src/sim/economy';
 import { deserialize, serialize } from '../src/sim/save';
-import { applyOffline } from '../src/sim/offline';
 import {
   STARDUST_EXPONENT,
   STARDUST_LIST,
@@ -13,7 +12,6 @@ import {
   collapse,
   collapseThreshold,
   stardustCost,
-  stardustEffects,
   stardustFor,
 } from '../src/sim/prestige';
 import { UPGRADE_IDS } from '../src/sim/upgrades';
@@ -99,7 +97,7 @@ describe('the collapse itself', () => {
     expect(s.achievements, 'you did those').toEqual(['first-mass']);
     for (const id of UPGRADE_IDS) {
       expect(s.levelsEver[id], `${id} investment`).toBe(40);
-      expect(autoBuyUnlocked(s, id), `${id} automation`).toBe(true);
+      expect(isOpen(s, id), `${id} is still open`).toBe(true);
       expect(s.autoBuy[id], `${id} toggle is a preference`).toBe(true);
     }
   });
@@ -169,38 +167,6 @@ describe('the stardust tree', () => {
     expect(earned).toBeGreaterThan(2);
     expect(deriveRates(advanced).elementTier).toBe(earned);
   });
-
-  it('lowers the bar to automate, without removing it', () => {
-    const s = initialState(NOW);
-    expect(stardustEffects(s).autoBuyLevel).toBe(25);
-    s.stardustLevels.memory = 99;
-    expect(stardustEffects(s).autoBuyLevel).toBeGreaterThan(0);
-    expect(stardustEffects(s).autoBuyLevel).toBeLessThan(25);
-  });
-
-  /**
-   * The cap on Deep Slumber is a design statement, not a balance knob. An absence that pays
-   * better than presence makes the strongest play "close the tab", and no upgrade should sell
-   * a player that.
-   */
-  it('never lets an absence beat being present', () => {
-    const s = initialState(NOW);
-    s.stardustLevels.slumber = 99;
-    expect(stardustEffects(s).offlineRate).toBeLessThanOrEqual(1.35);
-  });
-
-  it('credits an absence at the slumber rate', () => {
-    const run = (slumber: number) => {
-      const s = initialState(NOW);
-      s.totalMassEver = D('1e4');
-      s.mass = D('1e4');
-      s.stardustLevels.slumber = slumber;
-      s.lastSeen = NOW;
-      applyOffline(s, NOW + 3600_000);
-      return s.totalMassEver.toNumber();
-    };
-    expect(run(5)).toBeGreaterThan(run(0));
-  });
 });
 
 describe('a save carrying a collapse', () => {
@@ -228,7 +194,7 @@ describe('a save carrying a collapse', () => {
       lastSeen: NOW,
     };
     const s = deserialize(v2, NOW);
-    expect(s.version).toBe(3);
+    expect(s.version).toBe(SAVE_VERSION);
     expect(s.stardust.toNumber()).toBe(0);
     expect(s.collapses).toBe(0);
     expect(s.stardustLevels.enrichment).toBe(0);

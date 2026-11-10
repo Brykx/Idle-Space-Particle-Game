@@ -17,7 +17,7 @@ import type { GameState } from './state';
  */
 
 /** Ids of the permanent upgrades Stardust buys. */
-export const STARDUST_IDS = ['enrichment', 'seed', 'ignition', 'slumber', 'memory'] as const;
+export const STARDUST_IDS = ['enrichment', 'seed', 'ignition'] as const;
 
 export type StardustId = (typeof STARDUST_IDS)[number];
 
@@ -33,12 +33,16 @@ export interface StardustDef {
 }
 
 /**
- * Five upgrades, deliberately, and deliberately orthogonal.
+ * Three upgrades, deliberately orthogonal.
  *
- * Only one of them multiplies income. The rest change the *shape* of a run — how much you
- * start with, how far up the chain you begin, what an absence is worth, how soon automation
- * arrives — because a prestige tree of six different global multipliers is six ways to write
- * the same upgrade, and the second run should feel different rather than merely shorter.
+ * Only one of them multiplies income. The others change the *shape* of a run — how much you
+ * start with, how far up the chain you begin — because a prestige tree of six different
+ * global multipliers is six ways to write the same upgrade, and the second run should feel
+ * different rather than merely shorter.
+ *
+ * There were five. Deep Slumber bought back an offline shortfall and Muscle Memory lowered
+ * the bar to automate; both patched problems that stopped existing when absence lost its cap
+ * and a current began to flow from its first level.
  *
  * Costs are in whole Stardust and grow geometrically, so the tree has the same shape as the
  * mass economy and the same reasoning applies to it.
@@ -71,28 +75,6 @@ export const STARDUST_UPGRADES: Record<StardustId, StardustDef> = {
     // One per element above hydrogen that is actually reachable.
     maxLevel: 4,
     perLevel: '+1 starting element tier',
-  },
-  slumber: {
-    id: 'slumber',
-    name: 'Deep Slumber',
-    blurb: 'The disk keeps its rhythm while you are not watching.',
-    baseCost: 3,
-    growth: 2.6,
-    // Five levels, +30%, and the cap is the design rather than a balance knob. Coarse offline
-    // steps under-pay by roughly a quarter over a twelve-hour absence, so this buys that back
-    // and stops. Letting it go further would make an absence worth more than presence, and
-    // the best play would be to close the tab.
-    maxLevel: 5,
-    perLevel: '+6% offline rate',
-  },
-  memory: {
-    id: 'memory',
-    name: 'Muscle Memory',
-    blurb: 'You have built all of this before. Your hands know the order.',
-    baseCost: 4,
-    growth: 3.4,
-    maxLevel: 4,
-    perLevel: '-5 levels to automate',
   },
 };
 
@@ -157,14 +139,7 @@ export interface StardustEffects {
   seedMass: Num;
   /** Element tier the next run starts at. */
   startingTier: number;
-  /** 0..1 of the present rate credited while away, before the step-size shortfall. */
-  offlineRate: number;
-  /** Levels an upgrade needs before it will buy itself. */
-  autoBuyLevel: number;
 }
-
-const BASE_AUTO_BUY_LEVEL = 25;
-const BASE_OFFLINE_RATE = 1;
 
 export function stardustEffects(s: GameState): StardustEffects {
   const level = s.stardustLevels;
@@ -172,8 +147,6 @@ export function stardustEffects(s: GameState): StardustEffects {
     massMultiplier: Math.pow(1.15, level.enrichment),
     seedMass: level.seed > 0 ? D(8).pow(level.seed) : D(0),
     startingTier: Math.min(STARDUST_UPGRADES.ignition.maxLevel, level.ignition),
-    offlineRate: BASE_OFFLINE_RATE + 0.06 * Math.min(STARDUST_UPGRADES.slumber.maxLevel, level.slumber),
-    autoBuyLevel: Math.max(5, BASE_AUTO_BUY_LEVEL - 5 * Math.min(STARDUST_UPGRADES.memory.maxLevel, level.memory)),
   };
 }
 
@@ -194,10 +167,9 @@ export function buyStardust(s: GameState, id: StardustId): boolean {
  * What survives is chosen rather than incidental:
  *
  * - **Achievements** survive, because they record what you have done and you did it.
- * - **Levels ever bought** survive, so a collapse never takes back an auto-buyer you earned.
- *   The tree has its own answer to automation — Muscle Memory lowers the bar — and taking
- *   the bar away entirely at the moment you start over would make run two a worse version of
- *   run one for its first twenty minutes, which is the opposite of the point.
+ * - **Levels ever bought** survive, so every current you have opened is still open. The second
+ *   star needs no opening at all, which is the point: a later run is about the choices, not
+ *   about clicking through the first twenty minutes again.
  * - **Auto-buy toggles** survive, because they are a preference, not progress.
  * - Everything else goes: mass, lifetime mass, energy, every upgrade level, the stage.
  *
@@ -221,7 +193,6 @@ export function collapse(s: GameState): Num | null {
   for (const id of UPGRADE_IDS) s.levels[id as UpgradeId] = 0;
   s.rebasedStage = 0;
   s.stageSeen = 0;
-  s.pulseReadyAt = 0;
 
   return gained;
 }

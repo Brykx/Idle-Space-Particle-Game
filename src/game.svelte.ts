@@ -1,13 +1,12 @@
 import { format, formatDuration, type Notation, type Num } from './sim/numbers';
 import {
-  AUTO_BUY_LEVEL,
-  autoBuyUnlocked,
   buy,
+  currentsOpen,
   deriveRates,
+  isOpen,
   isUnlocked,
   nextCost,
   promotionMultiplier,
-  pulse as pulseEconomy,
   tick,
 } from './sim/economy';
 import { ACHIEVEMENTS, multiplierFor } from './sim/achievements';
@@ -95,9 +94,8 @@ export interface UpgradeView {
   /** What one more level does to income, e.g. "+4.2%". Shows when an upgrade has gone flat. */
   gain: string;
   autoBuy: boolean;
-  autoBuyUnlocked: boolean;
-  /** Level this upgrade must reach before it will buy itself. */
-  autoBuyAt: number;
+  /** Begun by hand at least once, so it can flow. */
+  open: boolean;
   /** Resets to zero at every promotion, and is repriced to the new stage. */
   rebased: boolean;
   currency: 'mass' | 'energy';
@@ -210,13 +208,8 @@ export interface View {
   nextElementName: string;
   elements: ElementRowView[];
 
-  pulseReady: boolean;
-  pulseCooldown: number;
-  pulseYield: string;
-
   playTime: string;
   purchases: number;
-  pulses: number;
 
   notation: Notation;
   particleBudget: number;
@@ -277,12 +270,8 @@ function emptyView(): View {
     elementProgress: 0,
     nextElementName: '',
     elements: [],
-    pulseReady: true,
-    pulseCooldown: 0,
-    pulseYield: '0',
     playTime: '0s',
     purchases: 0,
-    pulses: 0,
     notation: 'letters',
     particleBudget: 1200,
     reducedMotion: false,
@@ -414,8 +403,6 @@ function createGame() {
       enrichment: effects.massMultiplier > 1 ? `x${effects.massMultiplier.toFixed(2)} to all mass` : 'none',
       seed: effects.seedMass.gt(0) ? `${format(effects.seedMass, notation)} starting mass` : 'none',
       ignition: effects.startingTier > 0 ? `start at ${elementAt(effects.startingTier).name}` : 'none',
-      slumber: effects.offlineRate > 1 ? `+${Math.round((effects.offlineRate - 1) * 100)}% offline rate` : 'none',
-      memory: effects.autoBuyLevel < AUTO_BUY_LEVEL ? `automate at Lv ${effects.autoBuyLevel}` : 'none',
     };
 
     view.supernova = state.playTime < supernovaUntil;
@@ -508,8 +495,7 @@ function createGame() {
         eta: affordable ? '' : formatDuration(seconds),
         gain: `+${(gainFraction * 100).toFixed(gainFraction < 0.01 ? 2 : 1)}% ${gainLabel}`,
         autoBuy: state.autoBuy[def.id],
-        autoBuyUnlocked: autoBuyUnlocked(state, def.id),
-        autoBuyAt: AUTO_BUY_LEVEL,
+        open: isOpen(state, def.id),
         rebased: def.rebased === true,
         currency: def.currency,
       };
@@ -568,7 +554,7 @@ function createGame() {
     view.achievementsUnlocked = state.achievements.length;
     view.achievementMultiplier = `x${multiplierFor(state.achievements.length).toFixed(2)}`;
     view.autoBuyReserve = state.settings.autoBuyReserve;
-    view.autoBuyersUnlocked = UPGRADE_LIST.filter((def) => autoBuyUnlocked(state, def.id)).length;
+    view.autoBuyersUnlocked = currentsOpen(state);
 
     if (state.achievements.length > achievementsAnnounced) {
       const fresh = state.achievements.slice(achievementsAnnounced);
@@ -583,13 +569,8 @@ function createGame() {
       }
     }
 
-    view.pulseReady = state.playTime >= state.pulseReadyAt;
-    view.pulseCooldown = Math.max(0, state.pulseReadyAt - state.playTime);
-    view.pulseYield = format(rates.pulseYield, notation);
-
     view.playTime = formatDuration(state.playTime);
     view.purchases = state.stats.purchases;
-    view.pulses = state.stats.pulses;
 
     view.notation = notation;
     view.particleBudget = state.settings.particleBudget;
@@ -693,7 +674,7 @@ function createGame() {
     refreshView();
 
     try {
-      field = await createField(fieldParent, { onPulse: () => actions.pulse() });
+      field = await createField(fieldParent, { onPulse: () => actions.stir() });
       refreshField();
     } catch (error) {
       // No WebGL, or a context that refused to start. The game is entirely playable without
@@ -737,14 +718,13 @@ function createGame() {
       }
     },
 
-    pulse(): void {
-      if (pulseEconomy(state) === null) return;
+    /** Touching the field stirs it. It pays nothing, so there is no best rhythm to do it in. */
+    stir(): void {
       field?.pulse();
-      refreshView();
     },
 
     toggleAutoBuy(id: UpgradeId): void {
-      if (!autoBuyUnlocked(state, id)) return;
+      if (!isOpen(state, id)) return;
       state.autoBuy[id] = !state.autoBuy[id];
       refreshView();
     },

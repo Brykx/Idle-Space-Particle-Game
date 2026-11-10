@@ -1,5 +1,5 @@
 import { D, type Num } from './numbers';
-import { PULSE_COOLDOWN, type GameState } from './state';
+import type { GameState } from './state';
 import { ACHIEVEMENTS, multiplierFor } from './achievements';
 import { costScaleAt, stageIndexFor } from './stages';
 import { elementAt, elementTierFor, nextRequirement } from './elements';
@@ -28,10 +28,30 @@ const BASE_RADIUS = 10;
 const BASE_SPAWN = 4;
 
 /**
+ * What one level of each mass upgrade does.
+ *
+ * Named, because two things read them: the formula in `deriveRates`, and the automation's
+ * estimate of what a level is worth. They used to be bare literals inside the formula, which
+ * was fine while only the formula used them — and would have become two copies of the same
+ * five numbers the moment anything else needed to know what a level buys.
+ */
+const GRAVITY_STEP = 1.34;
+const RADIUS_STEP = 4;
+const DENSITY_STEP = 1.165;
+const PARTICLE_MASS_STEP = 1.34;
+const EFFICIENCY_STEP = 1.34;
+
+/**
  * Sets the scale at which reach stops mattering much. Capture saturates towards 1 and never
  * arrives, so radius and gravity always do something and never break the game.
  */
 const CAPTURE_K = 30;
+
+/** The fraction of what drifts past that a given reach catches. */
+function captureAt(reach: number): number {
+  // Guard the far end: once gravity overflows a float the fraction is 1 for all purposes.
+  return Number.isFinite(reach) ? reach / (reach + CAPTURE_K) : 1;
+}
 
 /**
  * The share of the growth exponent that climbing the ladder pays, rather than buying.
@@ -65,12 +85,19 @@ export function promotionMultiplier(stage: number): number {
 }
 
 /**
- * Levels of an upgrade before it will buy itself, before Stardust lowers it.
+ * How long the automation is willing to wait for a purchase to pay for itself, in seconds.
  *
- * Kept as the export the UI and tests reason about; `stardustEffects` is the thing that
- * actually decides, so that Muscle Memory has one place to take effect rather than several.
+ * This one number is what lets automation be the default rather than something to supervise.
+ * Capture saturates towards 1 without ever arriving, so Gravity Well and Capture Radius keep
+ * a positive gain forever — vanishingly small, never zero. An automation with no notion of
+ * worth poured over half of everything into those two cards at a measured 0.0% each, and the
+ * documented fix was for the player to notice and switch them off.
+ *
+ * An hour is stated in the player's terms rather than tuned to a target: an upgrade that
+ * will not repay itself within an hour of play is one you would buy something else instead
+ * of. Past it a card has *settled*, and the automation leaves it alone until that changes.
  */
-export const AUTO_BUY_LEVEL = 25;
+export const AUTO_PAYBACK_HORIZON = 3600;
 
 /**
  * Safety net on auto-purchases per tick, not a budget.
@@ -89,11 +116,6 @@ const MAX_AUTO_PURCHASES_PER_TICK = 2000;
 /** Fraction of the raw infall a bare disk sheds as energy. */
 const BASE_THROUGHPUT = 2e-5;
 
-/** A pulse is worth this many seconds of production... */
-const PULSE_SECONDS = 5;
-/** ...or this many particles outright, whichever is kinder. Keeps the opening minute alive. */
-const PULSE_MIN_PARTICLES = 3;
-
 export interface Rates {
   gravity: number;
   radius: number;
@@ -111,8 +133,6 @@ export interface Rates {
   massPerParticle: Num;
   globalMultiplier: number;
   massPerSecond: Num;
-  /** What a pulse would pay right now. */
-  pulseYield: Num;
 
   // --- the energy economy -------------------------------------------------------------
   /** Fraction of the raw infall the disk sheds as energy. */
@@ -129,10 +149,10 @@ export interface Rates {
 
 /** Pure: state in, every derived number out. Used by the UI, the renderer and the tests alike. */
 export function deriveRates(s: GameState): Rates {
-  const gravity = BASE_GRAVITY * Math.pow(1.34, s.levels.gravity);
-  const radius = BASE_RADIUS + 4 * s.levels.radius;
-  const spawnRate = BASE_SPAWN * Math.pow(1.165, s.levels.density);
-  const massPerParticle = D(1.34).pow(s.levels.particleMass);
+  const gravity = BASE_GRAVITY * Math.pow(GRAVITY_STEP, s.levels.gravity);
+  const radius = BASE_RADIUS + RADIUS_STEP * s.levels.radius;
+  const spawnRate = BASE_SPAWN * Math.pow(DENSITY_STEP, s.levels.density);
+  const massPerParticle = D(PARTICLE_MASS_STEP).pow(s.levels.particleMass);
 
   // Climbing the ladder pays. Everything else here is something you bought.
   const stage = stageIndexFor(s.totalMassEver);
@@ -143,14 +163,13 @@ export function deriveRates(s: GameState): Rates {
   const stardust = stardustEffects(s);
 
   const globalMultiplier =
-    Math.pow(1.34, s.levels.efficiency) *
+    Math.pow(EFFICIENCY_STEP, s.levels.efficiency) *
     multiplierFor(s.achievements.length) *
     ladderMultiplier *
     stardust.massMultiplier;
 
   const reach = radius * Math.sqrt(gravity);
-  // Guard the far end: once gravity overflows a float the fraction is 1 for all purposes.
-  const captureFraction = Number.isFinite(reach) ? reach / (reach + CAPTURE_K) : 1;
+  const captureFraction = captureAt(reach);
 
   // The energy economy, computed from the *raw* infall rather than the finished one.
   //
@@ -179,11 +198,6 @@ export function deriveRates(s: GameState): Rates {
 
   const massPerSecond = rawMassPerSecond.mul(elementMultiplier);
 
-  const pulseYield = Num_max(
-    massPerSecond.mul(PULSE_SECONDS),
-    massPerParticle.mul(PULSE_MIN_PARTICLES * globalMultiplier * elementMultiplier),
-  );
-
   return {
     gravity,
     radius,
@@ -196,7 +210,6 @@ export function deriveRates(s: GameState): Rates {
     massPerParticle: massPerParticle.mul(elementMultiplier),
     globalMultiplier,
     massPerSecond,
-    pulseYield,
     diskThroughput,
     energyPerSecond,
     requirementScale,
@@ -204,10 +217,6 @@ export function deriveRates(s: GameState): Rates {
     elementMultiplier,
     nextElementRequirement: nextRequirement(elementTier, requirementScale),
   };
-}
-
-function Num_max(a: Num, b: Num): Num {
-  return a.gte(b) ? a : b;
 }
 
 /** Credit mass and keep the running total honest. The single place mass is created. */
@@ -234,64 +243,117 @@ function spend(s: GameState, def: UpgradeDef, amount: Num): void {
 }
 
 /**
- * An upgrade buys itself only once you have invested in it by hand.
+ * A current is *open* once you have begun it by hand, and it stays open.
  *
- * Measured against levels *ever* bought, not the current level, so a rebased upgrade does not
- * hand back its auto-buyer at every promotion.
+ * Beginning one is the only purchase the game asks you to make yourself: one deliberate act
+ * per upgrade, after which it grows without you. The gate used to be twenty-five levels,
+ * which was a hundred and twenty-five clicks of proving that you wanted not to click.
+ *
+ * Read from levels *ever* bought, so neither a promotion resetting Density nor a new run
+ * resetting everything closes a current you have already opened. The second star needs no
+ * opening at all.
  */
-export function autoBuyUnlocked(s: GameState, id: UpgradeId): boolean {
-  return s.levelsEver[id] >= stardustEffects(s).autoBuyLevel;
+export function isOpen(s: GameState, id: UpgradeId): boolean {
+  return s.levelsEver[id] >= 1;
 }
 
-export function autoBuyersAvailable(s: GameState): number {
-  return UPGRADE_LIST.filter((def) => autoBuyUnlocked(s, def.id)).length;
+/** Open, and not held back by the player. */
+export function isFlowing(s: GameState, id: UpgradeId): boolean {
+  return s.autoBuy[id] && isOpen(s, id);
 }
 
-export function autoBuyersOn(s: GameState): number {
-  return UPGRADE_LIST.filter((def) => s.autoBuy[def.id] && autoBuyUnlocked(s, def.id)).length;
+export function currentsOpen(s: GameState): number {
+  return UPGRADE_LIST.filter((def) => isOpen(s, def.id)).length;
+}
+
+export function currentsFlowing(s: GameState): number {
+  return UPGRADE_LIST.filter((def) => isFlowing(s, def.id)).length;
 }
 
 /**
- * Spend on behalf of the player, cheapest first.
+ * What one more level of a mass upgrade adds to income, as a fraction: 0.34 is +34%.
  *
- * Cheapest-first is the priority rule, and it self-balances: buying the cheapest raises its
- * cost, so spending spreads across everything enabled and keeps the next costs roughly level.
- * What it will not do is notice that an upgrade has stopped being worth buying — Gravity Well
- * saturates and would happily absorb your income forever. That is what the per-upgrade
- * toggles are for, and why each card shows what a level is currently worth.
+ * Closed-form, from the same named steps the formula uses, because the automation asks this
+ * for every card on every tick and a full `deriveRates` probe per card per tick is most of a
+ * second over a long absence. A test holds it against the probe, so the two cannot drift.
+ *
+ * The energy-side upgrades return 0: their value is step-shaped — nothing at all until a
+ * level tips the core over a fusion threshold — and no marginal figure describes that.
+ */
+export function levelGain(id: UpgradeId, rates: Rates): number {
+  switch (id) {
+    case 'gravity':
+      return captureAt(rates.radius * Math.sqrt(rates.gravity * GRAVITY_STEP)) / rates.captureFraction - 1;
+    case 'radius':
+      return captureAt((rates.radius + RADIUS_STEP) * Math.sqrt(rates.gravity)) / rates.captureFraction - 1;
+    case 'density':
+      return DENSITY_STEP - 1;
+    case 'particleMass':
+      return PARTICLE_MASS_STEP - 1;
+    case 'efficiency':
+      return EFFICIENCY_STEP - 1;
+    default:
+      return 0;
+  }
+}
+
+/** Seconds for the next level of a mass upgrade to earn back what it costs. */
+export function paybackSeconds(s: GameState, id: UpgradeId, rates: Rates): number {
+  const gain = levelGain(id, rates);
+  if (!(gain > 0) || rates.massPerSecond.lte(0)) return Infinity;
+  const seconds = nextCost(s, id).div(rates.massPerSecond.mul(gain)).toNumber();
+  return Number.isFinite(seconds) ? seconds : Infinity;
+}
+
+/**
+ * Spend on behalf of the player: whatever repays itself soonest, and nothing that will not.
+ *
+ * It used to be cheapest-first, which self-balances but cannot tell when a card has stopped
+ * being worth buying. Payback order with a horizon can, so a saturated card settles instead
+ * of absorbing the run — and that is what allows this to be on by default.
+ *
+ * Energy-side currents are bought whenever they can be afforded. Their value arrives in
+ * steps that a payback figure cannot see, energy has nothing else to be spent on, and a
+ * player looking at a bar showing how far off the next element is would buy them on sight.
  *
  * Returns how many levels were bought.
  */
 export function runAutoBuyers(s: GameState): number {
   const spendFraction = 1 - s.settings.autoBuyReserve;
-  const stage = stageIndexFor(s.totalMassEver);
   let bought = 0;
+  // Derived lazily and only refreshed after a purchase: most ticks buy nothing.
+  let rates: Rates | null = null;
 
-  // Per currency: "cheapest" only means something between prices in the same units.
-  for (const currency of ['mass', 'energy'] as const) {
-    for (let n = 0; n < MAX_AUTO_PURCHASES_PER_TICK; n++) {
-      let cheapestId: UpgradeId | null = null;
-      let cheapest: Num | null = null;
+  for (let n = 0; n < MAX_AUTO_PURCHASES_PER_TICK; n++) {
+    let bestId: UpgradeId | null = null;
+    let bestScore = Infinity;
 
-      for (const def of UPGRADE_LIST) {
-        if (def.currency !== currency) continue;
-        if (!s.autoBuy[def.id]) continue;
-        if (!autoBuyUnlocked(s, def.id)) continue;
-        if (!isUnlocked(s, def)) continue;
+    for (const def of UPGRADE_LIST) {
+      if (!isFlowing(s, def.id) || !isUnlocked(s, def)) continue;
+      // Recomputed each pass: the budget shrinks as the loop spends.
+      if (nextCost(s, def.id).gt(walletFor(s, def).mul(spendFraction))) continue;
 
-        const cost = costAt(def, s.levels[def.id], stage);
-        // Recomputed each pass: the budget shrinks as the loop spends.
-        if (cost.gt(walletFor(s, def).mul(spendFraction))) continue;
-        if (!cheapest || cost.lt(cheapest)) {
-          cheapest = cost;
-          cheapestId = def.id;
-        }
+      let score: number;
+      if (def.currency === 'energy') {
+        // Always worth it, and ahead of anything bought with mass: different wallet, no
+        // competition, and the sooner a fusion tier lands the better.
+        score = -1;
+      } else {
+        rates ??= deriveRates(s);
+        score = paybackSeconds(s, def.id, rates);
+        if (score > AUTO_PAYBACK_HORIZON) continue;
       }
 
-      if (!cheapestId) break;
-      if (buy(s, cheapestId, 1) === 0) break;
-      bought += 1;
+      if (score < bestScore) {
+        bestScore = score;
+        bestId = def.id;
+      }
     }
+
+    if (!bestId) break;
+    if (buy(s, bestId, 1) === 0) break;
+    bought += 1;
+    rates = null;
   }
 
   return bought;
@@ -313,8 +375,8 @@ export function awardAchievements(s: GameState, rates: Rates): string[] {
     captureFraction: rates.captureFraction,
     stageIndex: rates.stage,
     elementTier: rates.elementTier,
-    autoBuyersOn: autoBuyersOn(s),
-    autoBuyersAvailable: autoBuyersAvailable(s),
+    flowing: currentsFlowing(s),
+    open: currentsOpen(s),
   };
 
   const earned: string[] = [];
@@ -374,20 +436,6 @@ export function tick(s: GameState, dt: number): void {
   // `sim/offline.ts`, which picks one based on whether automation is running.
   runAutoBuyers(s);
   awardAchievements(s, rates);
-}
-
-export function pulseReady(s: GameState): boolean {
-  return s.playTime >= s.pulseReadyAt;
-}
-
-/** Returns what the pulse paid, or null if it was still on cooldown. */
-export function pulse(s: GameState): Num | null {
-  if (!pulseReady(s)) return null;
-  const yield_ = deriveRates(s).pulseYield;
-  earn(s, yield_);
-  s.pulseReadyAt = s.playTime + PULSE_COOLDOWN;
-  s.stats.pulses += 1;
-  return yield_;
 }
 
 export function isUnlocked(s: GameState, def: UpgradeDef): boolean {

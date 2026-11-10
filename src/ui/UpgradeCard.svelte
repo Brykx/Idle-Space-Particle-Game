@@ -73,18 +73,18 @@
       <span class="eta">&nbsp;</span>
     {/if}
 
-    {#if upgrade.autoBuyUnlocked}
+    {#if upgrade.open}
       <label class="auto">
         <input
           type="checkbox"
           checked={upgrade.autoBuy}
           onchange={() => onautobuy(upgrade.id)}
         />
-        auto
+        flowing
       </label>
     {:else}
-      <span class="auto locked" title="Auto-buy unlocks at level {upgrade.autoBuyAt}">
-        auto at Lv {upgrade.autoBuyAt}
+      <span class="auto locked" title="Buy one level and it carries on by itself">
+        begin it once
       </span>
     {/if}
   </div>

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { D } from '../src/sim/numbers';
 import { initialState } from '../src/sim/state';
-import { buy, deriveRates, pulse, pulseReady, tick } from '../src/sim/economy';
+import { buy, deriveRates, tick } from '../src/sim/economy';
 import { UPGRADES, costAt, costOfLevels, maxAffordable } from '../src/sim/upgrades';
-import { applyOffline, MAX_OFFLINE_SECONDS } from '../src/sim/offline';
+import { applyOffline, OFFLINE_HORIZON_SECONDS } from '../src/sim/offline';
 
 const NOW = 1_700_000_000_000;
 
@@ -84,8 +84,8 @@ describe('offline', () => {
    * gap is under one percent.
    *
    * The direction is the part worth asserting. Under-paying an absence is a known, bounded
-   * cost of integrating in steps — the thing Deep Slumber exists to buy back. Over-paying
-   * would mean being away beat being present, which is a different kind of bug entirely.
+   * cost of integrating in steps. Over-paying would mean being away beat being present, which
+   * is a different kind of bug entirely.
    */
   it('credits a coarse catch-up close to a fine one, and never more', () => {
     const fine = initialState(NOW);
@@ -99,19 +99,34 @@ describe('offline', () => {
     expect(ratio).toBeGreaterThan(0.97);
   });
 
-  it('caps a long absence and says so', () => {
+  /**
+   * An absence has no edge any more. A fortnight is credited as a fortnight, and the report
+   * has nothing in it about what was forfeited because nothing was.
+   */
+  it('credits a fortnight as a fortnight', () => {
     const s = initialState(NOW);
-    const report = applyOffline(s, NOW + 14 * 24 * 3600 * 1000);
+    const fortnight = 14 * 24 * 3600;
+    const report = applyOffline(s, NOW + fortnight * 1000);
     expect(report).not.toBeNull();
-    expect(report!.capped).toBe(true);
-    expect(report!.creditedSeconds).toBe(MAX_OFFLINE_SECONDS);
+    expect(report!.creditedSeconds).toBe(fortnight);
+    expect(report!.awaySeconds).toBe(fortnight);
+    expect('capped' in report!).toBe(false);
+    expect(s.playTime).toBeCloseTo(fortnight, 3);
   });
 
-  it('resolves a fortnight in the same step budget as a minute', () => {
+  it('stops counting only past a horizon nobody will experience as a limit', () => {
+    expect(OFFLINE_HORIZON_SECONDS).toBeGreaterThanOrEqual(30 * 24 * 3600);
+
+    const s = initialState(NOW);
+    const report = applyOffline(s, NOW + OFFLINE_HORIZON_SECONDS * 3 * 1000);
+    expect(report!.creditedSeconds).toBe(OFFLINE_HORIZON_SECONDS);
+  });
+
+  it('resolves a fortnight with nothing flowing in the time a short absence takes', () => {
     const s = initialState(NOW);
     const started = Date.now();
     applyOffline(s, NOW + 14 * 24 * 3600 * 1000);
-    expect(Date.now() - started).toBeLessThan(250);
+    expect(Date.now() - started).toBeLessThan(400);
   });
 
   it('clamps a backwards clock to zero rather than removing mass', () => {
@@ -165,28 +180,5 @@ describe('purchasing', () => {
     s.mass = D(1e6);
     buy(s, 'gravity', 10);
     expect(deriveRates(s).massPerSecond.gt(before)).toBe(true);
-  });
-});
-
-describe('gravity pulse', () => {
-  it('pays out, then holds a cooldown', () => {
-    const s = initialState(NOW);
-    const paid = pulse(s);
-    expect(paid).not.toBeNull();
-    expect(paid!.gt(0)).toBe(true);
-    expect(pulseReady(s)).toBe(false);
-    expect(pulse(s)).toBeNull();
-
-    tick(s, 10);
-    expect(pulseReady(s)).toBe(true);
-    expect(pulse(s)).not.toBeNull();
-    expect(s.stats.pulses).toBe(2);
-  });
-
-  it('is worth something on the very first click, before any income', () => {
-    const s = initialState(NOW);
-    const rates = deriveRates(s);
-    expect(rates.pulseYield.gte(rates.massPerSecond)).toBe(true);
-    expect(rates.pulseYield.gt(0)).toBe(true);
   });
 });

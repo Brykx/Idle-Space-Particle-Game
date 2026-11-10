@@ -98,12 +98,24 @@ describe('pacing', () => {
     expect(run.firstHour.doublingTime).toBeLessThan(150);
   });
 
-  it('never leaves the player with nothing to buy for long', () => {
-    expect(run.firstHour.worstGap).toBeLessThan(3 * MINUTE);
+  /**
+   * Opening a current is the only purchase the game asks for, so *when there is one to open*
+   * is the new shape of the first hour. The first has to come almost at once — it is the
+   * tutorial — and they should keep arriving rather than all landing in the first minute.
+   */
+  it('has a first current to begin within seconds, and more as the run goes on', () => {
+    const [first, ...rest] = run.openings;
+    expect(first, 'something to open').toBeDefined();
+    expect(first!.seconds).toBeLessThan(30);
+
+    expect(run.openings.length, 'every current is reached in a first run').toBe(8);
+    const last = rest[rest.length - 1]!;
+    expect(last.seconds, 'the last arrives well into the run').toBeGreaterThan(20 * MINUTE);
+    expect(last.seconds).toBeLessThan(90 * MINUTE);
   });
 
-  it('makes a purchase worth making, without burying them in noise', () => {
-    expect(run.firstHour.gainPerPurchase).toBeGreaterThan(0.01);
+  it('does the buying itself, without burying the run in purchases', () => {
+    expect(run.firstHour.purchases).toBeGreaterThan(50);
     expect(run.firstHour.purchases).toBeLessThan(600);
   });
 

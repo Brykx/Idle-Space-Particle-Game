@@ -133,16 +133,10 @@ test.describe('the game runs', () => {
     expect(await readMass(page)).toBeGreaterThan(first);
   });
 
-  test('pays out a gravity pulse, then holds a cooldown', async ({ page }) => {
-    const pulse = page.locator('.pulse');
-    await expect(pulse).toBeEnabled();
-
-    const before = await readMass(page);
-    await pulse.click();
-
-    await expect(pulse).toBeDisabled();
-    await expect(pulse).toContainText('Recharging');
-    expect(await readMass(page)).toBeGreaterThan(before);
+  test('has nothing on screen that pays you for pressing it on a timer', async ({ page }) => {
+    await expect(page.locator('.pulse')).toHaveCount(0);
+    await expect(page.getByText('Gravity Pulse')).toHaveCount(0);
+    await expect(page.getByText('Recharging')).toHaveCount(0);
   });
 
   test('buys an upgrade and raises income', async ({ page }) => {
@@ -253,33 +247,31 @@ test.describe('the game runs', () => {
     await expect(page.locator('.stage-name')).toHaveText('Pebble');
   });
 
-  test('unlocks auto-buy by investing, then spends on your behalf', async ({ page }) => {
-    // Gravity Well one level short of its auto-buy threshold, with mass to spend.
-    await seedSave(page, {
-      mass: '1e9',
-      totalMassEver: '1e9',
-      levels: { gravity: 24 },
-      achievements: [],
-    });
+  test('opens a current with one purchase, after which it flows by itself', async ({ page }) => {
+    // Nothing opened yet, with mass to spend.
+    await seedSave(page, { mass: '1e9', totalMassEver: '1e9', achievements: [] });
     await page.reload();
 
     const card = page.locator('.card').first();
-    await expect(card.locator('.auto.locked')).toContainText('auto at Lv 25');
+    await expect(card.locator('.auto.locked')).toContainText('begin it once');
+    await expect(card.locator('.level')).toHaveText('Lv 0');
 
     await card.locator('.buy').first().click();
-    await expect(card.locator('.level')).toHaveText('Lv 25');
 
+    // Flowing is the default: no switch to find, the level simply climbs.
     const toggle = card.locator('.auto input');
-    await expect(toggle).toBeVisible();
-    await expect(toggle).not.toBeChecked();
-
-    await toggle.check();
-    // Once it is on, the level climbs with no further clicks.
+    await expect(toggle).toBeChecked();
     await expect
       .poll(async () => Number((await card.locator('.level').innerText()).replace('Lv ', '')), {
         timeout: 15_000,
       })
-      .toBeGreaterThan(25);
+      .toBeGreaterThan(1);
+
+    // And it can be held.
+    await toggle.uncheck();
+    const held = Number((await card.locator('.level').innerText()).replace('Lv ', ''));
+    await page.waitForTimeout(1500);
+    expect(Number((await card.locator('.level').innerText()).replace('Lv ', ''))).toBe(held);
   });
 
   test('shows what a level is worth, and unlocks achievements', async ({ page }) => {
@@ -290,14 +282,11 @@ test.describe('the game runs', () => {
     await expect(page.locator('.card .gain').first()).toContainText('%');
 
     await page.getByRole('button', { name: 'Progress' }).click();
-    const unlockedBefore = await page.locator('.achievements li.unlocked').count();
-
-    await page.locator('.pulse').click();
-    await expect(page.locator('.achievements li.unlocked')).not.toHaveCount(unlockedBefore);
+    await expect(page.locator('.achievements li.unlocked').first()).toBeVisible();
 
     const banner = page.locator('.announce');
     await expect(banner).toBeVisible();
-    await expect(banner.locator('.eyebrow')).toHaveText('Achievement');
+    await expect(banner.locator('.eyebrow')).toContainText('Achievement');
   });
 
   test('keeps the Energy tab hidden until there is a disk, then runs on energy', async ({ page }) => {
@@ -323,7 +312,8 @@ test.describe('the game runs', () => {
     await expect(card.locator('.gain')).toContainText('throughput');
 
     await card.locator('.buy').first().click();
-    await expect(card.locator('.level')).toHaveText('Lv 1');
+    // Opened, so it carries on: with energy banked it is several levels up before we look.
+    await expect(card.locator('.level')).not.toHaveText('Lv 0');
     expect(await page.locator('.mass').innerText()).not.toBe('');
     void massBefore;
   });

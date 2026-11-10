@@ -70,7 +70,7 @@
 
   {#if view.autoBuyersUnlocked > 0}
     <div class="row">
-      <label for="reserve">Auto-buy reserve</label>
+      <label for="reserve">Held in reserve</label>
       <div class="slider">
         <input
           id="reserve"
@@ -85,7 +85,7 @@
       </div>
     </div>
 
-    <p class="note">Mass the auto-buyers will not touch, so you can save towards something by hand.</p>
+    <p class="note">Mass the currents will not touch, so you can save towards something by hand.</p>
   {/if}
 
   <div class="row">
@@ -134,7 +134,6 @@
   <dl class="stats">
     <div><dt>Time played</dt><dd class="num">{view.playTime}</dd></div>
     <div><dt>Upgrades bought</dt><dd class="num">{view.purchases}</dd></div>
-    <div><dt>Pulses fired</dt><dd class="num">{view.pulses}</dd></div>
     <div><dt>Achievements</dt><dd class="num">{view.achievementsUnlocked}/{view.achievementCount}</dd></div>
   </dl>
 </section>

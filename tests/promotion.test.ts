@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { D } from '../src/sim/numbers';
-import { initialState, type GameState } from '../src/sim/state';
+import { SAVE_VERSION, initialState, type GameState } from '../src/sim/state';
 import { deriveRates, tick, buy, PROMOTION_SHARE, promotionMultiplier } from '../src/sim/economy';
 import { ACCRETION_STAGES, costScaleAt, stageAt, stageIndexFor } from '../src/sim/stages';
 import { REBASED_UPGRADE_IDS, UPGRADES, costAt } from '../src/sim/upgrades';
@@ -147,7 +147,7 @@ describe('the version 1 save', () => {
 
   it('loads, and applies the new rule where the player is standing', () => {
     const s = deserialize(v1, NOW);
-    expect(s.version).toBe(3);
+    expect(s.version).toBe(SAVE_VERSION);
     expect(s.levels.density, 'rebased levels go').toBe(0);
     expect(s.rebasedStage, 'and the reset is recorded, so the next tick does not repeat it')
       .toBe(stageIndexFor(D('1e10')));

@@ -63,6 +63,49 @@ const MIGRATIONS: Record<number, (raw: SaveBlob) => SaveBlob> = {
    * forgotten one, and the difference only shows up in somebody's lost save.
    */
   2: (raw) => ({ ...raw, version: 3 }),
+
+  /**
+   * 3 -> 4: the game stopped asking for you.
+   *
+   * Three things change shape. Gravity Pulse no longer pays, so its cooldown and its count
+   * have nothing to describe and are simply not carried over. A current flows from its first
+   * level rather than its twenty-fifth, and flowing became the default rather than a reward —
+   * so every toggle is switched on, including ones the player had off, because under the old
+   * rules "off" mostly meant "not yet earned" and the two cannot be told apart from here.
+   * The automation is value-aware now, which is what makes that safe: it will not pour mass
+   * into a saturated card the way the old one did.
+   *
+   * And two cards left the tree. Deep Slumber and Muscle Memory each patched a problem this
+   * version removes at the source, so what was spent on them is handed back at exactly the
+   * prices they were bought at. Those prices are written out here on purpose: a migration
+   * that reads today's tables is a migration that silently changes meaning the next time the
+   * tables do.
+   */
+  3: (raw) => {
+    const tree = { ...((raw.stardustLevels ?? {}) as Record<string, unknown>) };
+    const retired: Array<[id: string, baseCost: number, growth: number]> = [
+      ['slumber', 3, 2.6],
+      ['memory', 4, 3.4],
+    ];
+    let refund = D(0);
+    for (const [id, baseCost, growth] of retired) {
+      const levels = Math.max(0, Math.floor(asFiniteNumber(tree[id], 0)));
+      for (let level = 0; level < levels; level++) {
+        refund = refund.add(D(baseCost).mul(D(growth).pow(level)).ceil());
+      }
+      delete tree[id];
+    }
+
+    const { pulseReadyAt: _cooldown, ...rest } = raw;
+    return {
+      ...rest,
+      version: 4,
+      // Emptied rather than rewritten: a current with no entry flows, which is the default.
+      autoBuy: {},
+      stardustLevels: tree,
+      stardust: asDecimal(raw.stardust, '0').add(refund).toString(),
+    };
+  },
 };
 
 export function serialize(s: GameState): SaveBlob {
@@ -81,7 +124,6 @@ export function serialize(s: GameState): SaveBlob {
     collapses: s.collapses,
     stardustLevels: { ...s.stardustLevels },
     playTime: s.playTime,
-    pulseReadyAt: s.pulseReadyAt,
     stageSeen: s.stageSeen,
     rebasedStage: s.rebasedStage,
     lastSeen: s.lastSeen,
@@ -136,7 +178,9 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
     // Never below the current level: a save that predates this field, or one that lost it,
     // should not read as less invested than it plainly is.
     base.levelsEver[id] = Math.max(level, Math.floor(asFiniteNumber(everRaw[id], 0)));
-    base.autoBuy[id] = autoBuyRaw[id] === true;
+    // Flowing unless the save says it is held: an upgrade the save has never heard of
+    // should behave the way a new one does.
+    base.autoBuy[id] = autoBuyRaw[id] !== false;
   }
 
   // Only ids this build knows about: an achievement removed in a later version should not
@@ -163,7 +207,6 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
     energy: asDecimal(blob.energy, '0'),
     totalEnergyEver: asDecimal(blob.totalEnergyEver, '0'),
     playTime: Math.max(0, asFiniteNumber(blob.playTime, 0)),
-    pulseReadyAt: Math.max(0, asFiniteNumber(blob.pulseReadyAt, 0)),
     // A save written before stages existed should not announce a backlog of them on load.
     stageSeen: Math.max(0, Math.floor(asFiniteNumber(blob.stageSeen, stageIndexFor(totalMassEver)))),
     // Defaulting to the current stage, not to zero: a save that somehow lost this field
@@ -186,7 +229,6 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
     },
     stats: {
       startedAt: asFiniteNumber(stats.startedAt, base.stats.startedAt),
-      pulses: Math.max(0, Math.floor(asFiniteNumber(stats.pulses, 0))),
       purchases: Math.max(0, Math.floor(asFiniteNumber(stats.purchases, 0))),
       longestAway: Math.max(0, asFiniteNumber(stats.longestAway, 0)),
       exports: Math.max(0, Math.floor(asFiniteNumber(stats.exports, 0))),
