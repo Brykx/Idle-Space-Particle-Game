@@ -83,6 +83,7 @@ function accentOf(rgb: number): string {
 import { deserialize, exportSave as exportSaveString, importSave, serialize } from './sim/save';
 import { clearSave, readSave, writeSave } from './storage';
 import { createField, type FieldHandle, type SkyStar } from './render/Field';
+import { createAmbience, type Ambience } from './audio/ambience';
 
 /**
  * The loop, and the view the UI reads.
@@ -324,6 +325,8 @@ export interface View {
   notation: Notation;
   particleBudget: number;
   reducedMotion: boolean;
+  sound: boolean;
+  volume: number;
 
   away: AwayReport | null;
   awayGained: string;
@@ -401,6 +404,8 @@ function emptyView(): View {
     notation: 'words',
     particleBudget: 1200,
     reducedMotion: false,
+    sound: false,
+    volume: 0.6,
     away: null,
     awayGained: '0',
     awayDuration: '',
@@ -415,6 +420,7 @@ function createGame() {
 
   let state: GameState = initialState();
   let field: FieldHandle | null = null;
+  let ambience: Ambience | null = null;
 
   let running = false;
   let frameHandle = 0;
@@ -686,6 +692,7 @@ function createGame() {
     // highest is worth saying.
     if (progress.index > state.stageSeen) {
       state.stageSeen = progress.index;
+      ambience?.bell();
       announce('You are now', progress.stage.name, progress.stage.blurb);
     }
 
@@ -844,6 +851,8 @@ function createGame() {
     view.notation = notation;
     view.particleBudget = state.settings.particleBudget;
     view.reducedMotion = state.settings.reducedMotion;
+    view.sound = state.settings.sound;
+    view.volume = state.settings.volume;
   }
 
   function refreshField(): void {
@@ -899,6 +908,15 @@ function createGame() {
       density: rates.complete ? 0 : Math.sqrt(rates.remaining),
       present: state.cloud !== null,
     });
+    refreshSound();
+  }
+
+  /** The drone follows what is in the middle of the screen, and all but stops between stars. */
+  function refreshSound(): void {
+    if (!ambience) return;
+    const stage = stageIndexFor(state.totalMassEver);
+    const body = stageAt(stage).look.body;
+    ambience.setState({ stage, luminous: body === 'star' || body === 'ember', present: state.cloud !== null });
   }
 
   /** The stars you have made, as the renderer draws them. */
@@ -1001,6 +1019,13 @@ function createGame() {
       console.warn('Particle field unavailable:', error);
     }
 
+    // Built now but silent: no context exists until sound is on and the player has touched
+    // the page, which is when a browser allows one to start.
+    ambience = createAmbience();
+    ambience.setVolume(state.settings.volume);
+    ambience.setEnabled(state.settings.sound);
+    refreshSound();
+
     running = true;
     // The loop derives elapsed time from `lastSeen`; stamp it so the first frame is not
     // credited with the whole load time.
@@ -1023,6 +1048,8 @@ function createGame() {
     window.removeEventListener('pagehide', save);
     field?.destroy();
     field = null;
+    ambience?.destroy();
+    ambience = null;
     save();
   }
 
@@ -1062,6 +1089,7 @@ function createGame() {
       // The record is in the sky before the light that carries it there sets off, so the
       // field knows where it is going; the field keeps it dark until it arrives.
       refreshScene();
+      ambience?.bell();
       field?.release({
         fate: done.fate,
         colour: stageAt(safeStageIndex(done.star.stage)).look.core,
@@ -1111,6 +1139,26 @@ function createGame() {
       refreshField();
     },
 
+    setSound(on: boolean): void {
+      state.settings.sound = on;
+      // This is a click, so it is the gesture a browser wants before it will play anything.
+      ambience?.setEnabled(on);
+      ambience?.unlock();
+      refreshSound();
+      refreshView();
+    },
+
+    setVolume(volume: number): void {
+      state.settings.volume = Math.max(0, Math.min(1, volume));
+      ambience?.setVolume(state.settings.volume);
+      refreshView();
+    },
+
+    /** Called on any gesture: starts the audio context if sound is on and it is not running. */
+    unlockAudio(): void {
+      ambience?.unlock();
+    },
+
     setReducedMotion(on: boolean): void {
       state.settings.reducedMotion = on;
       refreshView();
@@ -1130,6 +1178,8 @@ function createGame() {
       try {
         state = importSave(text);
         applyOffline(state);
+        ambience?.setVolume(state.settings.volume);
+        ambience?.setEnabled(state.settings.sound);
         save();
         refreshView();
         refreshScene();

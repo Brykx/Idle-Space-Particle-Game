@@ -45,6 +45,8 @@
   const IDLE_AFTER_MS = 9000;
 
   function wake(): void {
+    // Browsers only start audio from a gesture, and any movement here may be one.
+    game.unlockAudio();
     idle = false;
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => (idle = true), IDLE_AFTER_MS);
@@ -178,6 +180,8 @@
           onbudget={game.setParticleBudget}
           onreserve={game.setAutoBuyReserve}
           onreducedmotion={game.setReducedMotion}
+          onsound={game.setSound}
+          onvolume={game.setVolume}
           onexport={game.exportSave}
           onimport={game.importSave}
           onreset={game.hardReset}

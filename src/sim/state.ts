@@ -15,6 +15,10 @@ export interface Settings {
    * hand while automation handles the cheap end. 0 means they spend freely.
    */
   autoBuyReserve: number;
+  /** Generated ambience. Off until asked for: a game that makes noise uninvited is asking. */
+  sound: boolean;
+  /** 0..1. */
+  volume: number;
 }
 
 export interface Stats {
@@ -136,6 +140,8 @@ export function initialState(now = Date.now()): GameState {
       particleBudget: 1200,
       reducedMotion: false,
       autoBuyReserve: 0,
+      sound: false,
+      volume: 0.6,
     },
     stats: {
       startedAt: now,

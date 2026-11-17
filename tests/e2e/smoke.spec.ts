@@ -580,3 +580,41 @@ test.describe('on a phone', () => {
     await expect(sheet).toBeHidden();
   });
 });
+
+test.describe('sound, if you want it', () => {
+  test('is off until asked for, and remembered once it is', async ({ page }) => {
+    await page.goto('/');
+    await openSheet(page, 'Settings');
+    const toggle = page.locator('#sound');
+    await expect(toggle).not.toBeChecked();
+    await expect(page.locator('#volume')).toHaveCount(0);
+
+    await toggle.check();
+    await expect(page.locator('#volume')).toBeVisible();
+
+    await page.waitForTimeout(1200);
+    await page.reload();
+    await openSheet(page, 'Settings');
+    await expect(page.locator('#sound')).toBeChecked();
+  });
+
+  /**
+   * The only honest check of a synthesiser is to listen to it. The closest a test can come is
+   * to render the drone, a note and a bell offline and look at the samples: there should be
+   * sound, it should not clip, and none of it should be NaN — which is what a bad parameter
+   * ramp produces, silently, in every browser.
+   */
+  test('renders a drone, a note and a bell that are audible, unclipped and finite', async ({ page }) => {
+    await page.goto('/?audiotest');
+    await page.waitForFunction(() => '__renderAmbience' in window);
+    const result = await page.evaluate(async () => {
+      const render = (window as unknown as { __renderAmbience: (s: number) => Promise<{ peak: number; rms: number; nan: boolean }> }).__renderAmbience;
+      return render(4);
+    });
+    expect(result.nan).toBe(false);
+    expect(result.peak).toBeGreaterThan(0.01);
+    expect(result.peak).toBeLessThan(0.99);
+    expect(result.rms).toBeGreaterThan(0.002);
+  });
+});
+

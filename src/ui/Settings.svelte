@@ -8,12 +8,14 @@
     onbudget: (n: number) => void;
     onreserve: (n: number) => void;
     onreducedmotion: (on: boolean) => void;
+    onsound: (on: boolean) => void;
+    onvolume: (v: number) => void;
     onexport: () => string;
     onimport: (text: string) => boolean;
     onreset: () => void;
   }
 
-  const { view, onnotation, onbudget, onreserve, onreducedmotion, onexport, onimport, onreset }: Props =
+  const { view, onnotation, onbudget, onreserve, onreducedmotion, onsound, onvolume, onexport, onimport, onreset }: Props =
     $props();
 
   let saveText = $state('');
@@ -98,6 +100,36 @@
       onchange={(event) => onreducedmotion(event.currentTarget.checked)}
     />
   </div>
+
+  <div class="row">
+    <label for="sound">Sound</label>
+    <input
+      id="sound"
+      type="checkbox"
+      checked={view.sound}
+      onchange={(event) => onsound(event.currentTarget.checked)}
+    />
+  </div>
+
+  {#if view.sound}
+    <div class="row">
+      <label for="volume">Volume</label>
+      <div class="slider">
+        <input
+          id="volume"
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          value={view.volume}
+          oninput={(event) => onvolume(Number(event.currentTarget.value))}
+        />
+        <span class="num">{Math.round(view.volume * 100)}%</span>
+      </div>
+    </div>
+  {/if}
+
+  <p class="note">A drone that follows the body, a few slow notes, a bell when something changes. Generated, never looped.</p>
 
   <hr />
 

@@ -324,6 +324,8 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
       particleBudget: Math.min(20000, Math.max(0, asFiniteNumber(settings.particleBudget, base.settings.particleBudget))),
       reducedMotion: settings.reducedMotion === true,
       autoBuyReserve: Math.min(0.9, Math.max(0, asFiniteNumber(settings.autoBuyReserve, 0))),
+      sound: settings.sound === true,
+      volume: Math.min(1, Math.max(0, asFiniteNumber(settings.volume, base.settings.volume))),
     },
     stats: {
       startedAt: asFiniteNumber(stats.startedAt, base.stats.startedAt),
