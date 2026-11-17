@@ -4,30 +4,41 @@
 
 You are a gravitational seed in cold, empty space. Loose particles drift past. You pull them
 in. What you catch becomes mass; mass is gravity; gravity catches more. Eventually the thing
-you have built ignites, then collapses, then eats light itself.
+you have built ignites — and when you let it go, it takes a place in your night sky.
 
-**Core loop:** particles → core → mass → upgrades → stronger pull → more particles.
+**Core loop:** particles → core → mass → currents → stronger pull → more particles.
+**Long loop:** a cloud → a star → let it go → the sky remembers → a larger cloud.
+
+> Since the zen redesign, a run is one star and the long game is a sky that fills.
+> [`zen-redesign.md`](zen-redesign.md) is the reasoning and the measured numbers; this
+> document is the economy and the fiction, updated to match it.
 
 ## The screen
 
 ```
-┌──────────────────────────────────────────────┬──────────────────┐
-│                                              │  MASS  1.24e9 kg │
-│              ·  ·        ·                   │  +4.82e6 /s      │
-│         ·      ╲   ·   ╱      ·              ├──────────────────┤
-│      ·     ·    ╲    ╱    ·                  │ Gravity Well  L7 │
-│   ·      ·    ·  ╲ ╱  ·      ·   ·           │   ×1.12  4.2e5   │
-│          ·  ·  ·(CORE) ·  ·  ·               │ Capture Radius L4│
-│   ·      ·    ·  ╱ ╲  ·      ·   ·           │   +1.5   9.1e5   │
-│      ·     ·    ╱    ╲    ·                  │ Density       L2 │
-│         ·      ╱   ·   ╲      ·              │   +0.5   2.2e6   │
-│              ·  ·        ·                   │ ...              │
-│         [click anywhere: GRAVITY PULSE]      │                  │
-└──────────────────────────────────────────────┴──────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│     ✦                        Pebble                     [≡]     │
+│            ·           Enough grains to be a thing.        ✦    │
+│                  ·    ╲   ·   ╱    ·                            │
+│        ✦      ·    ·   ╲    ╱   ·      ·          ✦             │
+│                ·   ·  ·  (CORE)  ·  ·   ·                       │
+│          ·        ·    ╱    ╲    ·         ·                    │
+│    ✦           ·      ╱   ·   ╲      ·                  ✦       │
+│                                                                 │
+│  Planet                                                         │
+│  6.2 trillion                                                   │
+│  ──────────────                                                 │
+│  Gas Giant in a few minutes                                     │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-Left: the field. Right: the upgrade column. Everything the player needs in one view, no tabs
-until Phase 3 earns them.
+The window is the whole screen. The margin is one caption — the stage, the mass in words, a
+hairline towards the next stage, and a rough sense of when — and a line of text that fades in
+and out when something happens. Your own stars (✦) are in the sky behind everything.
+Everything else is a sheet you summon with the button in the corner: **System** (the
+currents, and how mass is made), **Energy**, **Sky** (letting a star go, the next cloud, the
+tree, your catalogue), **Journal** and **Settings**. At the side on a desk, from the bottom on
+a phone. The interface dims after a few seconds without movement.
 
 ### Reading the field
 
@@ -45,8 +56,8 @@ The near-misses are not decoration; they are what makes the capture upgrades leg
 #### Particle trails
 
 A still frame of the field reads as a starfield: a scatter of dots with no direction. In
-motion the inward drift is there, but it is subtle, and the moment a Gravity Pulse yanks
-everything toward the core should be unmistakable. A short trail on each particle makes speed
+motion the inward drift is there, but it is subtle, and the moment something yanks the
+field should be unmistakable. A short trail on each particle makes speed
 and direction readable in a single frame.
 
 How it is done matters, because the field is a pooled `ParticleContainer` holding exactly one
@@ -62,7 +73,7 @@ The particle texture is a soft radial dot, so stretching it produces a streak fo
 - Costs one more dynamic property on the container (`rotation`) and an `atan2` per particle
 - Falls out of the physics rather than being layered on top: particles accelerate as they
   fall, so streaks lengthen towards the core exactly where the motion is most interesting,
-  and a pulse turns the whole field into inward streaks in a single frame
+  and a stir swirls the streaks where you touched in a single frame
 
 Two things to watch. Additive blending means overlapping streaks stack, so the stretch needs
 a ceiling or the centre blows out at high particle counts. And a trail is motion, so under
@@ -130,13 +141,15 @@ Getting here took five passes:
 The rate constant and the shape are separate dials, which is what made the last two passes
 possible: `Π baseCost^ratio` sets how fast, the ratio sum sets whether it stays straight.
 
-### Active play: Gravity Pulse
+### Touching the field
 
-Click the field (or press space) to emit a pulse that yanks nearby particles into the core: a
-real visual event, worth 5 s of production or 3 particles outright — whichever is kinder, so
-it is worth something on the very first click — on a 10 s cooldown. Active play is a modest bonus, never a
-requirement — upgrades later automate it entirely. Idle games that punish you for closing the
-tab don't get reopened.
+Touching the field stirs it: a ripple where you touched, and a swirl in whatever is near. It
+pays nothing, on purpose.
+
+It used to be Gravity Pulse — five seconds of income on a ten-second cooldown, which made the
+optimal way to play clicking every ten seconds forever, with three achievements named after
+doing exactly that. A timer that pays is a chore with a reward attached. Now there is no best
+rhythm to touch it in, so it is a toy, and being present is pleasant rather than required.
 
 ## The stage ladder
 
@@ -144,11 +157,17 @@ The number is abstract; the thing in the middle of the screen is not. Every thre
 ladder changes what you are, and the core visibly morphs into it.
 
 ```
-dust → pebble → boulder → planetesimal → asteroid → protoplanet → planet   accretion,  mass ↑
-planet → gas giant → brown dwarf → red dwarf → star → supergiant           accretes H, mass ↑
-★ supergiant ──SUPERNOVA──> neutron star                                   mass ↓ ~90%: RESET
-neutron star → black hole                                                  past TOV,   mass ↑
+dust → pebble → boulder → planetesimal → asteroid → protoplanet → planet   accretion
+planet → gas giant → brown dwarf                                           accretes H
+red dwarf (M) → orange (K) → yellow (G) → white (F) → blue-white (A)       the main sequence,
+           → blue giant (B) → blue supergiant (O)                          as far as the cloud allows
+★ let go:  M rises · K–A shed a planetary nebula · B, O go supernova      → into your sky
+neutron star · black hole                                                  what a star leaves
 ```
+
+Each run climbs only as far as its cloud allows — the first can make a Sun, later ones are
+chosen, and Reach in the tree finds larger ones. The spectral classes are real: their colours
+are blackbody colours, and each one's fate is the one its mass decides.
 
 Driven by lifetime mass, not current mass, so spending never demotes your core. You built
 those upgrades out of what you caught; the core keeps what it was.
@@ -177,8 +196,8 @@ ladder, and it is a single rule rather than two settings:
 
 Dust is a haze of hundreds of specks that barely fall — your gravity is feeble, and what you
 catch is catching *itself* as much as you. By Planet it should be sparse traffic of
-individually visible meteors, each one an event. By Supergiant you are swallowing whole
-moons: a handful of large bodies on screen at a time, each arriving with weight.
+individually visible meteors, each one an event. By the blue supergiant you are swallowing
+whole moons: a handful of large bodies on screen at a time, each arriving with weight.
 
 Indicative shape across the twelve accretion stages:
 
@@ -189,7 +208,7 @@ Indicative shape across the twelve accretion stages:
 | Asteroid | ×0.9 | ×1.5 | rocks on visible arcs |
 | Planet | ×1.6 | ×0.8 | meteors, each one an event |
 | Brown Dwarf | ×2.5 | ×0.45 | large bodies, sparse |
-| Supergiant | ×4.2 | ×0.22 | moons, one or two at a time |
+| Blue Supergiant | ×4.2 | ×0.22 | moons, one or two at a time |
 
 **Count falls roughly as the inverse square of size**, so the total lit area stays in a narrow
 band. That matters because the field blends additively: hold area roughly constant and the
@@ -247,14 +266,18 @@ But gas giant → brown dwarf (13 Jupiter masses, deuterium fusion) → red dwar
 masses, hydrogen fusion) is a real, mass-gated sequence. Phase 2's element chain is what
 gates it in the game, which means the correction pays for a system already planned.
 
-**Star to neutron star is the one that runs backwards.** A star does not become a neutron
-star by gaining mass. It runs out of fuel, its core collapses, and it throws roughly ninety
-percent of itself away. A 20-solar-mass star leaves a 1.4-solar-mass remnant.
+**The main sequence is mass-gated too**, and it is the honest end of accretion: a star's
+class is its mass. M through O is the whole range a cloud can make, and the cloud decides
+where in it a run stops.
 
-That is a prestige reset. You lose nearly everything and keep a far denser core plus the
-heavy elements you scattered — and supernovae genuinely are where most heavy elements come
-from, so Stardust stops being a game-ism and becomes the mechanism. The last two stages
-therefore carry no threshold at all: no amount of accretion reaches them.
+**A star to what it leaves is the one that runs backwards.** A star does not become a white
+dwarf or a neutron star by gaining mass. It runs out of fuel and throws most of itself away —
+gently, as a shell of gas, under about eight solar masses; all at once, as a supernova, over
+it. That is the end of a run: you let the star go, it keeps its place in your sky, and what it
+threw off is the Stardust the next one is enriched with. Supernovae and planetary nebulae
+genuinely are where the heavy elements come from, so Stardust stops being a game-ism and
+becomes the mechanism. The last two bodies carry no threshold at all: no amount of accretion
+reaches them.
 
 **Neutron star to black hole is correct and mass-driven.** Past the Tolman-Oppenheimer-
 Volkoff limit (~2.2-2.9 solar masses) nothing holds it up. A pure threshold, no reset.
@@ -269,24 +292,33 @@ which point literal units become a lie you have to keep maintaining.
 ### Thresholds
 
 Placed against the measured curve rather than on round numbers, so promotions arrive on a
-rhythm: roughly four minutes apart at the start, stretching to eleven by the top.
+rhythm: roughly six minutes apart at the start, stretching to ten by the Sun. Times are the
+first run, from the first cloud; the classes above G come from later clouds, and the gaps
+widen on the way up because the stars do.
 
-| Stage | Threshold | Reached at | Analogue |
+| Stage | Threshold | First run | Analogue |
 |---|---|---|---|
 | Dust | 0 | start | a grain of interstellar dust |
-| Pebble | 100 | 0:50 | a handful of gravel |
-| Boulder | 2e3 | 4:46 | a boulder |
-| Planetesimal | 4e4 | 11:06 | a 1 km planetesimal |
-| Asteroid | 6e5 | 17:02 | Ceres |
-| Protoplanet | 1.5e7 | 23:57 | the Moon |
-| Planet | 6e8 | 32:08 | Earth |
-| Gas Giant | 4e10 | 41:12 | Jupiter |
-| Brown Dwarf | 4e12 | 51:06 | 13 Jupiter masses |
-| Red Dwarf | 6e14 | 1:02:06 | 0.08 solar masses |
-| Star | 1.2e17 | 1:13:52 | the Sun |
-| Supergiant | 1.5e19 | 1:24:42 | 20 solar masses |
-| Neutron Star | — | supernova | 1.4 solar masses |
-| Black Hole | — | past TOV | beyond 2.3 solar masses |
+| Pebble | 100 | 1:09 | a handful of gravel |
+| Boulder | 2e3 | 6:17 | a boulder |
+| Planetesimal | 4e4 | 15:20 | a 1 km planetesimal |
+| Asteroid | 6e5 | 21:50 | Ceres |
+| Protoplanet | 1.5e7 | 28:41 | the Moon |
+| Planet | 6e8 | 36:48 | Earth |
+| Gas Giant | 4e10 | 46:26 | Jupiter |
+| Brown Dwarf | 4e12 | 55:53 | 13 Jupiter masses |
+| Red Dwarf (M) | 6e14 | 1:06:55 | 0.08 solar masses |
+| Orange Dwarf (K) | 6e16 | 1:16:57 | 0.7 solar masses |
+| Yellow Dwarf (G) | 1.2e19 | 1:29:04 | the Sun |
+| White Star (F) | 6e21 | — | Procyon |
+| Blue-White Star (A) | 6e24 | — | Sirius |
+| Blue Giant (B) | 2e28 | — | Rigel |
+| Blue Supergiant (O) | 2e32, to 2e37 | — | Alnitak |
+| Neutron Star | — | what a supernova leaves | 1.4 solar masses |
+| Black Hole | — | still to come | beyond 2.3 solar masses |
+
+The first cloud is spent at 1:59 — the last half hour is the Sun easing to a finish as the
+field thins.
 
 ## Progression
 
@@ -306,51 +338,36 @@ The core passes Gas Giant and starts keeping the hydrogen it catches.
 - **Iron is a wall.** Fusing iron costs energy instead of producing it. The rate stalls. That
   is the prestige prompt, it is the real astrophysics, and it is the brake the curve needs.
 
-### Act III — Supernova (first prestige)
-Collapse the supergiant. Lose the mass, the upgrades, the energy, the elements. Gain
-**Stardust**:
+### Act III — The sky (the long game)
 
-```
-stardust = floor( 12 × (mass / threshold) ^ 0.6 )
-```
+A run is one star, and it ends when you let it go. The full design and its measurements are
+in [`zen-redesign.md`](zen-redesign.md); in short:
 
-Exponent 0.6 means prestiging later earns more in total but at falling efficiency, so there is
-a real decision every run instead of one correct answer.
+- **Clouds.** Every run condenses from a cloud with a ceiling (the largest class it can make),
+  a pace (small clouds are dense and quick, vast ones thin and slow) and a character — quiet,
+  icy, ferrous or turning — that changes what falls in without one being the right answer.
+  Income is multiplied by what is left of the cloud, so growth is exponential for almost all
+  of a run and then eases off until the star is finished. A finished star earns nothing more
+  however long it is left, which is what closed the old overnight exploit.
+- **Letting go.** Any star can be let go from the moment it ignites, and pays Stardust as a
+  gentle power of the orders of magnitude it grew — `1 + floor(3 × u^1.4)` — bounded by its
+  cloud. The first of each class pays a discovery bonus. It takes a permanent place in your
+  sky with its name, its class and the day you made it, and adds 2% to all mass, up to fifty
+  stars.
+- **The next cloud** is a choice between three, seeded so nothing rerolls, with a forecast in
+  words. Between stars the field is empty.
+- **The tree is bounded**: Reach (larger clouds can be found), Enrichment (x1.15 to all mass),
+  Prior Ignition (start further up the element chain), Wider Gaze (more clouds to choose
+  between). Every card ends, so permanent progress is finite and the summit — a blue
+  supergiant in your own sky — stays a long way up.
 
-Stardust buys a permanent tree of five, and only one of them is a multiplier. The other four
-change the *shape* of a run — how much mass you start with, how far up the element chain you
-begin, what an absence is worth, how soon automation arrives — because a tree of six global
-multipliers is six ways to write the same upgrade, and the second run should feel different
-rather than merely shorter.
+Measured, for someone looking in four times a day: the first Sun on day one, a white star on
+day three, a blue supergiant on day fourteen, the tree complete just before it.
 
-| Card | Does | Capped at |
-|---|---|---|
-| Enriched Nebula | x1.15 to all mass | — |
-| Seed Mass | x8 starting mass | — |
-| Prior Ignition | start one element tier higher | 4, the reachable chain |
-| Deep Slumber | +6% offline rate | 5, at parity with being present |
-| Muscle Memory | automate 5 levels sooner | 4 |
-
-Two of those caps are design statements rather than balance knobs. **Deep Slumber** stops at
-the point where an absence matches presence: coarse offline steps under-pay by roughly a
-quarter over twelve hours, so it buys that back and no more. Letting it go further would make
-the strongest play "close the tab", and no upgrade should sell a player that. **Prior
-Ignition** is a floor and not a bonus — once the disk has earned a higher tier on its own it
-adds nothing, so it accelerates the opening rather than raising the ceiling.
-
-Measured: collapsing ten minutes past the top of the ladder reaches Brown Dwarf 3.2x faster
-on the second run. Collapsing the instant you arrive is worth 1.7x; waiting twenty-five
-minutes is worth 16x.
-
-**The timing is the decision, and it is weaker than it looks.** The exponent below 1 means
-waiting earns more in total and less per order of magnitude — but mass is exponential in
-time, so Stardust per minute still rises the longer you wait. What actually bounds a run is
-that the tree's cheap levels run out and the geometric ones stop paying, not the exponent.
-Worth revisiting if a run ever starts feeling like a waiting game.
-
-### Act IV — Collapse (second prestige)
-Accrete past the TOV limit and the neutron star becomes a black hole. Reset Stardust for
-**Singularities**, and unlock mechanics rather than numbers:
+### Act IV — Collapse (still to come)
+The neutron stars your B and O stars leave are where this starts: accrete one past the TOV
+limit and it becomes a black hole. It would trade Stardust for **Singularities**, and unlock
+mechanics rather than numbers:
 
 - **Hawking Radiation** — passive mass while fully offline, the black hole's version of idle.
 - **Relativistic Jets** — periodic burst production, an active layer that isn't clicking.
@@ -382,7 +399,7 @@ were growing while the thing you interact with did not react at all.
 ### Density resets at every promotion
 
 *More particles* goes back to zero each time you are promoted, and its cost is **rebased** to
-the new stage — otherwise, at Supergiant, buying two hundred levels from a base of 30 mass
+the new stage — otherwise, at the top of the ladder, buying two hundred levels from a base of 30 mass
 costs nothing and the reset means nothing. The rebase is taken from the ladder's own
 thresholds (`costScaleAt`), so moving a threshold moves the pricing with it instead of
 silently changing how many levels a stage is worth.
@@ -405,6 +422,10 @@ hours, against the whole ladder's 19.2. That is the wall the concept predicted, 
 the two halves are one change.
 
 ### What a promotion is worth: the part the concept got wrong
+
+*The measurements in this section and the next were taken on the old ladder, whose top was
+called Supergiant and sat at 1.5e19 — roughly where the Sun is now. They are kept because the
+reasoning is the reason the code looks the way it does.*
 
 The original answer was a flat **x3**, from `10 ^ (0.293 x 1.56)` — Density's cost exponent
 times the ladder's average gap. Building it showed two problems.
@@ -456,13 +477,14 @@ read their own screen.
 
 The auto-buy unlock used to read the current level. A rebased upgrade resets, so that
 confiscated an auto-buyer the player had already earned, once per promotion. `levelsEver`
-records levels ever bought and never decreases, and the unlock reads that instead — one rule
-for every upgrade rather than an exception for the rebased ones.
+records levels ever bought and never decreases, and whether a current is open reads that
+instead — one rule for every upgrade rather than an exception for the rebased ones. It is
+also why the second star needs no opening at all: letting a star go keeps `levelsEver`.
 
 ### Still open here
 
-Gravity Well and Capture Radius remain finished about ten minutes in, and the cards honestly
-read `+0.00% income`. Rebasing them was considered and rejected: capture is bounded at 1, so
+Gravity Well and Capture Radius remain finished about ten minutes in, and their rows honestly
+read *settled*. Rebasing them was considered and rejected: capture is bounded at 1, so
 resetting it costs a fixed ~4x at every promotion, and the promotion multiplier would have to
 be inflated by the same 4x to cancel it. Two large numbers whose visible net effect is what
 you would get from neither is not a mechanic, it is bookkeeping.
@@ -611,45 +633,54 @@ The stall it causes is Phase 3's prestige prompt. Until prestige exists it is *o
 of the chain — everything else keeps climbing, so there is no dead end. Shipping a real wall
 before there is a way through it would be the worst state to leave a player in.
 
-### Automation
+### Automation: currents
 
-**Auto-buyers** unlock per upgrade, at level 25 of that upgrade. Automation is earned where
-you have already invested, which makes it a reward for engaging with an upgrade rather than a
-single milestone that hands the game over.
+Every upgrade is a **current**. It is begun once, by hand — the only purchase the game asks
+you to make yourself, about eight in a first run and none in later ones — and from then on it
+flows. A current can be **held** if you would rather tend it by hand.
 
-The priority rule is cheapest-first, and it self-balances: buying the cheapest raises its
-cost, so spending spreads across everything enabled and keeps the next costs roughly level.
-Its blind spot is saturation — Gravity Well feeds a capture fraction that asymptotes, and
-cheapest-first would happily pour income into it forever. So every upgrade card shows what
-one more level does to income, and the per-upgrade toggle is how the player acts on it. The
-information and the control are the same feature.
+The automation buys whatever repays itself soonest and leaves alone anything that would not
+soon enough. "Soon enough" is measured in the run's own time: a dozen tenfolds of its present
+growth, which is about an hour in the first run and far longer in a vast, slow cloud. That is
+what lets it be the default. Capture saturates towards 1 without arriving, so a level of
+Gravity Well is always worth *something* — and the cheapest-first automation it replaced
+poured over half of everything into two cards reading +0.00%, with the fix left to the
+player. Now a saturated card simply **settles**, and says so.
 
-A **reserve** slider holds back a fraction of your mass, so automation can handle the cheap
-end while you save towards something by hand.
+It used to take twenty-five levels of an upgrade to unlock its auto-buyer: a hundred and
+twenty-five clicks of proving you wanted not to click.
+
+A **reserve** slider holds back a fraction of your mass, so the currents can handle the
+cheap end while you save towards something by hand.
 
 ### Achievements
 
-23 so far, of a planned ~60. Each multiplies everything by 1.02.
+About seventy. Each multiplies everything by 1.02.
 
 That sounds small and is not: a constant multiplier scales the growth *rate*, not just the
-total, so across a run that gains 26 orders of magnitude a single 2% achievement is worth
-about half an order. The full set pulls the climb to Supergiant in from 1:25 to 1:07.
+total, so across a run that gains twenty orders of magnitude a single 2% achievement is worth
+a sizeable share of one. The full set is about x4 by the end of a career.
 
 They avoid mirroring the stage ladder, which already rewards getting heavier. These are about
-what you did to get there: pulses fired, levels bought, crossing half and then ninety percent
-capture, switching on automation, coming back after a day away.
+what you did to get there — levels bought, crossing half and then ninety percent capture,
+letting your currents flow, coming back after a day away — and about the sky: a red dwarf
+kept, a planetary nebula, a supernova, every class from M to O, a star stopped short. None
+rewards doing something on a timer.
 
 ### The rest
 
-- **Statistics** — playtime, purchases, pulses, achievements.
-- **Number notation** — scientific / engineering / letters, player's choice. Non-negotiable
-  for this genre.
-- **Settings** — particle budget slider (perf and taste), reduced motion, auto-buy reserve,
-  save export/import, hard reset behind a confirm.
-- **Tabs** — Core, Energy, Progress, Settings. The Energy tab does not exist until there is a
-  disk: a game that unfolds beats one that opens with four empty rooms.
-- **Audio** — low drone that thickens with mass, a pitched swell per stage, and one genuinely
-  loud supernova. Muted by default; autoplay policies mean it must be anyway.
+- **Numbers are words**: `4.15 billion`, not `4.151 B`, and the caption repaints once a
+  second. Letters, scientific and engineering remain a choice in Settings.
+- **The sheet** — System, Energy, Sky, Journal, Settings. Energy appears with the disk; Sky
+  once the core is a star that could be let go. A game that unfolds beats one that opens
+  with four empty rooms.
+- **Settings** — particle budget slider (perf and taste), reduced motion, sound and volume,
+  the reserve, save export/import, hard reset behind a confirm.
+- **Sound** — generated, never looped: a drone whose root walks down a pentatonic as the body
+  grows, sparse notes over it, and a bell when something changes. Off until asked for.
+- **Away** — an absence is just time, credited for up to a month. The note on return says
+  what happened, including a star that finished while you were gone; it never says what was
+  forfeited, because nothing is.
 
 ## Accessibility and performance targets
 
@@ -660,45 +691,62 @@ capture, switching on automation, coming back after a day away.
 
 ## Balance methodology
 
-Pacing gets tested, not guessed. A headless sim (`npm run balance`) plays the game with a
-greedy buy-cheapest-first policy and prints time-to-milestone:
+Pacing gets tested, not guessed. A headless sim (`npm run balance`) plays the game the way it
+now expects to be played — every current begun once, as soon as it can be, and then left to
+the game's own automation — and prints time-to-milestone for the first star:
 
 ```
-  Pebble                100        50s
-  Boulder           2.000e3       4:46
-  Planetesimal      4.000e4      11:06
-  Asteroid          6.000e5      17:02
-  Protoplanet       1.500e7      23:57
-  Planet            6.000e8      32:08
-  Gas Giant        4.000e10      41:12
-  Brown Dwarf      4.000e12      51:06
-  Red Dwarf        6.000e14    1:02:06
-  Star             1.200e17    1:13:52
-  Supergiant       1.500e19    1:24:42
+  Pebble                100       1:09
+  Boulder           2.000e3       6:17
+  Planetesimal      4.000e4      15:20
+  Asteroid          6.000e5      21:50
+  Protoplanet       1.500e7      28:41
+  Planet            6.000e8      36:48
+  Gas Giant        4.000e10      46:26
+  Brown Dwarf      4.000e12      55:53
+  Red Dwarf        6.000e14    1:06:55
+  Orange Dwarf     6.000e16    1:16:57
+  Yellow Dwarf     1.200e19    1:29:04
+  Cloud spent        1:58:58
 
   curve shape — log10(mass) every 5 minutes
-  0m:0.7  5m:3.3  10m:4.4  15m:5.4  20m:6.4  25m:7.4  30m:8.4  35m:9.4  40m:10.4
-  45m:11.4  50m:12.4  55m:13.4  60m:14.4  65m:15.4  70m:16.3  75m:17.3  80m:18.3
+  0m:0.0  5m:3.1  10m:3.8  15m:4.5  20m:5.4  25m:6.4  30m:7.4  35m:8.4  40m:9.3  45m:10.3
+  50m:11.3  55m:12.4  60m:13.3  65m:14.3  70m:15.4  75m:16.4  80m:17.2  85m:18.2  90m:19.2
+  95m:20.1  100m:20.9  105m:21.6  110m:21.8  115m:21.8
 
-  first hour: 265 purchases   income doubles every 89s   (target 45-150s)
-              +2.1% per purchase   (target 1-15%)   longest wait 20s
+  first hour: 234 levels bought   income doubles every 98s   (target 45-150s)
 ```
+
+Because the tool no longer carries a bot of its own, **the thing being measured and the thing
+doing the measuring are the same code**: it cannot disagree with the game about what playing
+it looks like. It used to: an earlier bot spent more than half its decisions on two saturated
+cards, and that was the clue that led to value-aware automation in the game itself.
+
+It then plays **whole careers**: choose a cloud, let the star finish, let it go, spend the
+Stardust, repeat — placed on the calendar of someone who looks in four times a day, so a star
+that finishes at three in the morning waits until eight. It reports the day each class is
+first made and the day the tree is complete, for a player who always takes the largest cloud
+and one who always takes the smallest. Those two bracket every real player. The numbers are
+in [`zen-redesign.md`](zen-redesign.md) §6.
 
 The stage ladder *is* the milestone list, so a threshold moved in `sim/stages.ts` shows up
 here without anything else changing.
 
-Two metrics were wrong before they were right. Counting purchases turned outCounting purchases turned out to measure the bot's policy rather than the design — an agent
-that buys the moment it can afford anything always buys one level at a time, whatever the
-curve. And doubling time was first computed as a median of per-interval rates, which measured
-the sampling cadence rather than the game: income only moves when something is bought, so
-most intervals gain nothing and the ones that gain a sliver report an enormous seconds-per-
-doubling. It is now measured across the whole window.
+Two metrics were wrong before they were right. Counting purchases turned out to measure the
+bot's policy rather than the design — an agent that buys the moment it can afford anything
+always buys one level at a time, whatever the curve. And doubling time was first computed as
+a median of per-interval rates, which measured the sampling cadence rather than the game:
+income only moves when something is bought, so most intervals gain nothing and the ones that
+gain a sliver report an enormous seconds-per-doubling. It is now measured across the whole
+window.
 
-The assertion that matters most compares the slope of the curve early against the slope late.
-A ratio outside 0.6-1.8 means the exponent sum has drifted off 1, which is the single change
-that can quietly ruin the whole game.
+The assertion that matters most compares the slope of the curve early against the slope late,
+up to the last promotion before the cloud starts to thin. A ratio outside 0.7-1.8 means the
+exponent sum has drifted off 1, which is the single change that can quietly ruin the whole
+game.
 
 The bounds in `tests/balance.test.ts` are generous on purpose. They are not claiming the
 tuning is good; they catch a change that doubles the first hour, opens a wall in the middle,
-or collapses the late game into nothing. All three are easy to do by accident and invisible
-in a five-minute play test.
+or collapses the long game into an afternoon — including the one that first tuned it: a tree
+that made the summit a six-day trip. All of these are easy to do by accident and invisible in
+a five-minute play test.

@@ -2,36 +2,34 @@
 
 An idle game about gravity. Loose particles drift through empty space; you pull them in. What
 you catch becomes mass, mass is gravity, and gravity catches more. Eventually the thing you
-have built ignites, then collapses, then eats light itself.
+have built ignites — and when you let it go, it takes a place in your night sky for good.
 
-Mass is the currency. You spend it on the pull, the reach, the density of the field, and the
-worth of what you catch.
+It is meant to be calm. Nothing asks for you: being present is pleasant and never required,
+and being away costs nothing.
 
-## Status
+## What it is now
 
-**Phase 1 complete, Phase 2 started.** The core loop runs end to end: five upgrades, a live
-particle field, Gravity Pulse, offline progress, versioned saves with an export string.
+**A run is one star.** It condenses out of a cloud, climbs a ladder of real bodies — dust,
+pebble, planetesimal, planet, gas giant, brown dwarf — ignites, and grows through the
+spectral classes its cloud allows, M through O, until the cloud is spent. The field thins as
+it happens, and a finished star sits alone in a cleared sky.
 
-On top of that, the **stage ladder**: fourteen stages from dust to black hole, each changing
-what the core looks like. Dust to Supergiant is accretion — you get there by getting heavier.
-The last two are not, because a star does not grow into a neutron star; it runs out of fuel
-and throws most of itself away. That collapse arrives with the supernova in Phase 3, and the
-ladder shows those two greyed out from the first minute.
+**Then you let it go.** What happens depends on its mass, as it does in the sky: a red dwarf
+simply rises; a star up to eight solar masses sheds a shell of glowing gas around a white
+dwarf; anything heavier ends in a supernova. Its light rises to its own place in your sky,
+with its name and the day you made it, and every run after is played in front of the ones
+before. Then you choose the next cloud — small and quick, or vast and slow — from three or
+more on offer.
 
-A full climb to the top of the visible ladder is about 85 minutes.
+**The rest is quiet.** Each upgrade is a *current*: begun once by hand, after which it flows
+by itself, buying whatever repays itself soonest and leaving alone whatever would not. The
+screen is the field and a single caption — the stage, the mass in words, a hairline, and a
+rough sense of when — with everything else in a sheet you summon. Sound, if you want it, is
+a generated drone that follows the body in the middle of the screen.
 
-Phase 2 so far adds **particle trails** (each sprite stretched along its velocity, so movement
-reads in a single frame), **auto-buyers** unlocked per upgrade at level 25, and **23
-achievements**, each multiplying everything by 1.02.
-
-It also adds the **energy economy**: an accretion disk that taxes the infall, energy as a
-second currency, and a fusion chain from hydrogen to iron that multiplies what each captured
-particle is worth. The side column is now tabbed, and the Energy tab appears only once there
-is a disk.
-
-Next: second-tier upgrades so the Core tab keeps changing past the twenty-minute mark,
-per-stage particle character (size and orbit), and Phase 3's supernova prestige — which is
-also when the iron wall can safely land.
+The first star takes about two hours. The largest the sky allows is a couple of weeks of
+looking in now and then. The reasoning behind all of it is in
+[the zen redesign](docs/zen-redesign.md).
 
 ## Running it
 
@@ -43,10 +41,11 @@ npm run dev        # http://localhost:5173
 | Script | What it does |
 |---|---|
 | `npm run check` | Typecheck, including `.svelte` files |
-| `npm run test` | Unit tests — economy, saves, pacing |
-| `npm run test:e2e` | Browser smoke tests (Playwright) |
+| `npm run test` | Unit tests — economy, clouds, the sky, saves, pacing, careers |
+| `npm run test:e2e` | Browser tests (Playwright), including a phone viewport and the audio |
 | `npm run build` | Production bundle into `dist/` |
-| `npm run balance` | Pacing report: time to milestone, doubling time, gain per purchase |
+| `npm run balance` | Pacing report: the first star stage by stage, and whole careers on a calendar |
+| `npm run bodies` | A gallery of every body, release and sky, at `/bodies.html?stage=…` |
 
 ## How it is put together
 
@@ -59,19 +58,24 @@ and the particle budget are three independent concerns rather than one tangle �
 `src/sim/` imports no DOM, no Pixi and no framework, so it runs in Node and gets real tests.
 
 ```
-src/sim/      pure economy: numbers, upgrades and stages as data, rates, offline, saves
-src/render/   the particle field; the only place Pixi is imported
-src/ui/       Svelte components, reading a view model refreshed at 12 Hz
+src/sim/      pure economy: numbers, upgrades, stages, clouds and the sky as data;
+              rates, automation, offline, forecasts, saves
+src/render/   the field, the sky, the release; the only place Pixi is imported
+src/audio/    the generated ambience
+src/ui/       Svelte components: the caption, the sheet and its pages
 src/game.svelte.ts   the loop: 20 Hz fixed tick, wall-clock reconciliation, autosave
-tools/        headless pacing simulation
+tools/        headless pacing and career simulation; the body gallery
 ```
 
 ## Documents
 
+- [The zen redesign](docs/zen-redesign.md) — what the game asks of the player and gives back,
+  and the measurements it was tuned to
+- [Game design](docs/game-design.md) — the core formula, the ladder, the economy
+- [Visual design](docs/visual-design.md) — real in the window, minimal in the margins
+- [Implementation plan](docs/implementation-plan.md) — module layout, phases, testing, risks
 - [Technology evaluation](docs/tech-evaluation.md) — the simulation/economy split, and the
   stack that follows from it
-- [Game design](docs/game-design.md) — the core formula, upgrades, five acts, prestige layers
-- [Implementation plan](docs/implementation-plan.md) — module layout, phases, testing, risks
 
 ## Licence
 
@@ -80,4 +84,4 @@ See [LICENSE](LICENSE).
 
 ## Stack
 
-TypeScript · Vite · Svelte 5 · PixiJS v8 · break_infinity.js · Vitest · Playwright
+TypeScript · Vite · Svelte 5 · PixiJS v8 · Web Audio · break_infinity.js · Vitest · Playwright

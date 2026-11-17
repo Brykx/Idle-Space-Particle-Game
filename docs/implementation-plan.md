@@ -10,24 +10,32 @@ src/
     upgrades.ts        # upgrade defs as DATA (id, cost curve, effect, unlock)
     stages.ts          # the stage ladder as DATA (threshold, blurb, analogue, look)
     elements.ts        # the fusion chain as DATA (multiplier, throughput needed)
-    economy.ts         # deriveRates(state) -> Rates ; tick(state, dt)
+    economy.ts         # deriveRates(state) -> Rates ; tick(state, dt) ; the currents
+    clouds.ts          # what a run condenses from: ceiling, pace, trait; the seeded offers
+    sky.ts             # letting a star go, the catalogue, the bounded tree
+    forecast.ts        # "within the hour": runs a copy of the star to find out
     offline.ts         # catch-up integration + away summary
-    prestige.ts        # reset layers, stardust/singularity formulas
     save.ts            # serialize, deserialize, MIGRATIONS[]
   render/
-    Field.ts           # the only file that imports pixi; init/setRates/pulse/destroy
+    Field.ts           # the only file that imports pixi; setRates/setSky/setCloud/release
+    sky.ts             # the turning night sky, and your stars in it
+    release.ts         # a shell of gas or a supernova, and the light rising to its place
+    nebula.ts          # the cloud's nebula and the shell, generated on a canvas
     shading.ts         # the GLSL: a shared impostor preamble + one surface per BodyKind
     impostor.ts        # Pixi plumbing for the shader bodies
     textures.ts        # procedural canvas bodies — the fallback when WebGL is unavailable
     pool.ts            # pre-allocated particle pool, zero per-frame allocation
-    effects.ts         # pulse, ignition, supernova, lensing
-  ui/                  # Svelte components; read snapshots, dispatch intents
-  game.ts              # the loop: accumulator, visibility, autosave — wires all three
+  audio/
+    ambience.ts        # the generated drone, notes and bell; renders offline for tests
+  ui/                  # Svelte: the caption, the whisper, the sheet and its pages
+  game.svelte.ts       # the loop: accumulator, visibility, autosave — wires all three
   main.ts
 tests/
-  economy.test.ts  save-migration.test.ts  balance.test.ts
+  economy  automation  sky  promotion  stages  energy  save  balance  numbers  field
+  e2e/smoke.spec.ts    # the browser, including a phone viewport and the audio
 tools/
-  balance.ts           # headless pacing sim -> time-to-milestone table
+  balance.ts           # headless pacing and career sim -> time to stage, day to class
+  bodies.ts            # a gallery of every body, release and sky
 ```
 
 Three rules hold the whole thing together:
@@ -189,6 +197,32 @@ Still open here: the second prestige (Act IV) is Phase 5, and the Neutron Star a
 stages remain unreachable by play — the remnant is shown for six seconds after a collapse,
 which is the only place that body appears in the game.
 
+### Phase 4½ — The zen redesign — **done**
+
+Not a phase anyone planned, and the most consequential one. The brief became *calmer, and
+satisfying for longer*, and both halves turned out to be about logic rather than picture. The
+reasoning and the measurements are in [`zen-redesign.md`](zen-redesign.md); what was built,
+in the order it was built:
+
+1. **The calm core.** Gravity Pulse stopped paying. A current opens with one purchase instead
+   of twenty-five and flows by default; the automation became value-aware, buying by payback
+   with a horizon measured in the run's own tenfolds. An absence is credited for a month.
+2. **The long game.** A run is one star from a finite cloud; the ladder's top became the real
+   spectral sequence M to O; letting a star go puts it in a sky that persists, pays a bounded,
+   log-based yield, and offers the next cloud. The tree became four cards that all end.
+3. **Calibration.** The balance tool plays careers. The first tree finished in six days with
+   late Suns taking minutes; weakened, repriced and with a steeper pace ladder, the summit is
+   two weeks away and the frontier is always a long run.
+4. **The interface.** The field is the whole screen; one caption; a sheet you summon, which is
+   also, finally, the phone layout. Numbers are words. Announcements fade.
+5. **The field.** Your stars in a turning sky, the cloud as a nebula, a shell or a supernova
+   when a star is let go and its light rising to its place, stars coloured by temperature,
+   rocks lit from the core.
+6. **Sound**, generated and off until asked for.
+
+Save version 5 carries old saves across: Stardust re-denominated on a log scale, the run
+continuing from the first cloud.
+
 ### Phase 4 — Visual pass — **mostly done**
 
 - **Field identity per stage — done.** `StageLook` carries particle size, count, orbit range,
@@ -288,35 +322,27 @@ should be worth recording.*
 *Phases 1 to 3 shipped roughly as written. The order of what is left no longer does, and it is
 worth saying why rather than quietly renumbering.*
 
-**The game is releasable now.** The risk table below has said since the beginning that it is
-releasable from the end of Phase 3, and Phase 3 has shipped: there is a first run of about an
-hour, a supernova, a permanent tree, sixty-one achievements and a second run that is three
-times faster. That is a complete idle game.
+**The game is releasable, and now it is playable.** The zen redesign brought what used to be
+the one blocking item — a phone layout — along with it, because a screen that is one caption
+and a sheet you summon is a phone layout. It also replaced the supernova prestige with a long
+game that lasts weeks rather than an afternoon.
 
-**It is not playable, though, because there is no phone layout.** The genre lives on phones —
-it is a game you leave running and glance at, which is a description of a phone. Every hour
-spent on a second prestige before that is an hour spent on content for players who cannot
-reach the first.
+**So shipping still comes before the black hole**, and is smaller than it was.
 
-**So shipping moves ahead of the black hole.** What was Phase 6 becomes Phase 5, and what was
-Phase 5 becomes Phase 6. Nothing else changes.
+There is a second, smaller reversal kept from before. The old Phase 5 bundled "second
+prestige" with "challenges". Those are not one thing: the second prestige is the *content*
+the remnants exist for, and challenges are a retention mechanic for players who have
+exhausted it. Splitting them means the black hole can ship without waiting for a framework
+nobody has asked for yet.
 
-There is a second, smaller reversal. The old Phase 5 bundled "second prestige" with
-"challenges". Those are not one thing: the second prestige is the *content* the ladder's last
-two stages exist for, and challenges are a retention mechanic for players who have exhausted
-it. Splitting them means the black hole can ship without waiting for a framework nobody has
-asked for yet.
+### Phase 5 — Ship (~2 days)
 
-### Phase 5 — Ship (~3 days)
-
-- **Mobile layout.** The one blocking item. Field above, panel below, tabs as a bottom bar.
-  The renderer already resizes; it is the panel that has never been asked to be narrow.
 - **Performance on a real low-end device**, not on a desktop with the profiler open. The
-  particle budget slider exists for this and has never been tested against a phone.
-- **Balance pass** driven by `tools/balance.ts`, now that the promotion multiplier, the
-  rebase, the achievement set and the prestige tree all interact.
-- **PWA**, so it survives being added to a home screen and closed.
-- README and screenshots.
+  particle budget slider exists for this and has never been tested against a phone, and the
+  sky, the nebula and the release add draw calls of their own.
+- **PWA**, so it survives being added to a home screen and closed — which matters more now
+  that runs are measured in hours and a career in weeks.
+- Screenshots.
 
 **Done when:** someone can play it on a phone on a train without being told how.
 
@@ -328,9 +354,10 @@ active layer that is not clicking, time dilation as a literal simulation-speed m
 the lensing shader — which is worth much more now that there is a real starfield behind it to
 bend.
 
-This is also what finally makes the Neutron Star and Black Hole stages reachable by playing.
-They have shaders and nobody can get to them; the collapse shows the remnant for six seconds
-and that is the entire appearance of two of the fourteen bodies.
+This is also what finally makes the Neutron Star and Black Hole reachable by playing. They
+have shaders, and today the neutron star appears only as the point a supernova leaves for a
+few seconds. The neutron stars your B and O stars leave are the natural place for it to start:
+a remnant chosen from your own sky, rather than a fresh ladder.
 
 **Done when:** the second prestige changes how the game is played, not how fast.
 
@@ -371,8 +398,16 @@ The economy is pure, so it gets real tests rather than token ones:
   the curve's early slope against its late slope, so a tuning tweak that doubles the first
   hour, opens a wall, or collapses the late game fails CI instead of shipping.
 
-Rendering gets one Playwright smoke test (load, buy, reload, mass persisted) and otherwise
-gets looked at by a human, which is the honest way to test a particle field.
+- **Careers** — a short simulated career asserts the second star is quicker than the first
+  but not trivially so; a run with everything permanent bought asserts the summit is still a
+  night's work. The tuning these replaced finished the whole tree in six days.
+
+The browser tests drive the game as a player would — begin a current from the caption, let a
+star go and choose the next cloud, survive a reload — on a desktop and a phone viewport, and
+check the field by its pixels where it can be checked that way: every body draws with
+structure, and between stars the centre is empty. The ambience is rendered offline and its
+samples checked. Everything else about the picture gets looked at by a human, which is the
+honest way to test a particle field.
 
 ## Risks
 
@@ -385,31 +420,30 @@ gets looked at by a human, which is the honest way to test a particle field.
 | A flat multiplier silently rescales the whole game | With cost exponents summing to ~1, income tracks capital, so any constant multiplier changes the growth *rate*. A x1500 element chain made the game ~70x faster. Multipliers stay small, and `tests/energy.test.ts` asserts the top of the chain stays under x10 |
 | Feedback between the two currencies | Energy is taxed from the *raw* infall, before the element multiplier, so a tier can never fund the disk level that reaches the next tier. Gating tiers on throughput rather than on energy/second stops fixed thresholds from being crossed all at once as income inflates |
 | Offline quietly pays less than being present | Auto-buyers make income a feedback loop, so the catch-up step size now sets accuracy, not just speed. Steps are capped at half a second while automation is running (60s when it is not, where the rate barely moves), and a test asserts the integration is converged at that step |
-| Scope drift into Acts IV-V | Phases ship independently; the game is releasable from the end of Phase 3 |
+| The long game collapses into an afternoon | The tree is bounded, the yield is log-based and capped by the cloud, and a career simulation runs in CI: the summit has to stay a night's work with everything bought |
+| Scope drift into Acts IV-V | Phases ship independently; the game is releasable now |
 
 ## What is open
 
 Phases 5 through 8, in the order above, plus the tail of Phase 4.
 
-The game is complete enough to release: a first run of about an hour, a supernova that pays,
-a permanent tree, sixty-one achievements, and a second run three times faster. What it is
-missing is not content.
+The game is complete enough to release and to play on a phone: a first star of about two
+hours, a sky that fills over weeks, a bounded tree, about seventy achievements, and nothing
+that asks for you. What it is missing is a home-screen install and a test on a real phone.
 
-**The one blocking item is a mobile layout.** Everything else on the list is an improvement to
-a game people can already play; that one decides whether they can play it at all.
+After shipping, the black hole. Then the things the zen redesign deliberately did not do,
+recorded in its §5 so they are not forgotten:
 
-After it, in order: depth sorting across the disc (`visual-design.md` F1), a real supernova
-sequence (B5), the core acting as the light source (L1), then the black hole.
-
-Two things are designed and not built, and both are recorded rather than forgotten:
-
-- **Second-tier upgrades** — Frame Dragging, Tidal Shear, Radiation Pressure. The Core tab
-  stops changing about twenty minutes in, and rebasing Density fixed its *pacing* without
-  adding any variety. Each one adds to the cost-exponent sum, so each must take share from a
-  tier-one upgrade or be tuned small.
-- **Capture is finished by design and the cards say so.** Gravity Well and Capture Radius
-  read `+0.00% income` for most of a run. Rebasing them was considered and rejected — capture
-  is bounded at 1, so resetting it costs a fixed ~4x at every promotion and the promotion
-  multiplier would have to be inflated by the same 4x to cancel it. Two large numbers whose
-  visible net effect is what you would get from neither is bookkeeping, not a mechanic. The
-  honest reading is that capture is an *onboarding* term: bounded, front-loaded, finished.
+- **Forks at promotions** — rings or moons, ocean or desert: the natural next layer of
+  identity for a single run, each needing its own visuals to be worth choosing.
+- **Constellations** — lines between your stars, once a sky has enough of them.
+- **Second-tier upgrades** — Frame Dragging, Tidal Shear, Radiation Pressure. Each adds to
+  the cost-exponent sum, so each must take share from a tier-one upgrade or be tuned small;
+  and with automation doing the buying, a new current is about what the field shows rather
+  than about another thing to click.
+- **Capture is finished by design, and its rows say so.** Gravity Well and Capture Radius
+  settle for most of a run. Rebasing them was considered and rejected — capture is bounded at
+  1, so resetting it costs a fixed ~4x at every promotion and the promotion multiplier would
+  have to be inflated by the same 4x to cancel it. Two large numbers whose visible net effect
+  is what you would get from neither is bookkeeping, not a mechanic. The honest reading is
+  that capture is an *onboarding* term: bounded, front-loaded, finished.

@@ -127,7 +127,7 @@ Costs are rough: **S** is an afternoon, **M** is a day or two, **L** is a week o
 | F4 | **Tails on infalling ice** — comet-like, pointing away from the star | M | Beautiful, and real: sublimation drives a tail anti-sunward | Later. Only makes sense once bodies have composition |
 | F5 | **Collision fragmentation** — two particles meet and become several smaller ones | L | Very pretty, genuinely how accretion discs work | **No.** Needs broad-phase collision in the pool, which is the one part that is currently O(n) and allocation-free |
 | F6 | **Gravitational focusing** — a visible over-density downstream of the core | M | The real effect that makes capture cross-section exceed geometric radius | Interesting, subtle. Low priority |
-| F7 | **Per-particle composition tint** — ice pale blue, silicate grey, iron warm | S | Ties the field to the element chain, which currently only shows as a number | **Do it.** Cheap, and it makes a system the player already has legible |
+| F7 | **Per-particle composition tint** — ice pale blue, silicate grey, iron warm | S | Ties the field to the element chain, which currently only shows as a number | **Partly done** with the zen redesign: a cloud's character tints what falls — icy pale and fine, ferrous dark and heavy. The element chain still does not show |
 | F8 | **Resonance gaps** — Kirkwood-style gaps in the disc | M | Instantly reads as "a real disc" to anyone who knows, invisible to everyone else | Skip. Cost falls on the wrong audience |
 
 ### 3.2 The bodies
@@ -138,7 +138,7 @@ Costs are rough: **S** is an afternoon, **M** is a day or two, **L** is a week o
 | B2 | **Moons** — one or two small bodies on stable orbits, appearing from Protoplanet up | M | Scale. A planet with a moon is unmistakably a planet | **Do it.** Also the cheapest way to make the core feel *inhabited* |
 | B3 | **Terminator city lights on the world** | S | A beloved image, and it would foreshadow the Bounce vision's life phase | Hold for Phase 7. Using it now spends the idea early |
 | B4 | **Axial tilt per stage** | S | Bodies stop all spinning about the same vertical | Do it. Nearly free — it is one more constant in `toBody` |
-| B5 | **A real supernova sequence** — the star swells, whitens, then blows a shell that becomes the next run's dust | M | The one moment in the game that should be worth recording. Currently a six-second remnant and a banner | **Do it.** This is the biggest single visual payoff left |
+| B5 | ~~**A real supernova sequence**~~ — **done** | M | The one moment in the game that should be worth recording | Built as the release sequence, decided by the star's mass: a red dwarf rises; a shell of teal and rose gas round a white dwarf; or a flash and a fast shell and a neutron star. Then the star's light rises to its place in your sky |
 | B6 | **Lensing shader on the black hole** — warp the actual starfield behind it | M | The best screenshot in the game, and now that there *is* a starfield it would land | Phase 6, with the second prestige |
 | B7 | **Accretion-disc shading on the hole from the real disc** rather than a painted ellipse | L | Correctness | No. The painted version already reads |
 
@@ -147,8 +147,8 @@ Costs are rough: **S** is an afternoon, **M** is a day or two, **L** is a week o
 | # | Idea | Cost | Buys | Verdict |
 |---|---|---|---|---|
 | S1 | **Parallax on the starfield** — two layers drifting at different rates | S | Depth, and a sense that you are somewhere rather than in front of a backdrop | **Do it,** extremely slowly. Fast parallax is the opposite of zen |
-| S2 | **Nebulae** — a few large, very soft coloured clouds | M | Warmth. The sky is currently true but cold | **Do it,** at very low alpha. Highest risk of looking like a screensaver — the discipline is that they must be *barely* there |
-| S3 | **The sky reddens as you climb** — the run's own enrichment tinting the background | M | Makes the ladder visible in the one place that never changes | Interesting. Try it; revert if it reads as a filter |
+| S2 | ~~**Nebulae**~~ — **done**, as the cloud | M | Warmth. The sky is currently true but cold | Built as one nebula per run, in the cloud's hue, generated from its seed and thinning as the cloud is spent — so it carries information rather than decorating. *Barely* there |
+| S3 | **The sky reddens as you climb** — the run's own enrichment tinting the background | M | Makes the ladder visible in the one place that never changes | Superseded: the sky now changes for a better reason — your own stars are in it, and it turns |
 | S4 | **Real constellations** | M | Nothing, for a player who is not on Earth | No. It is a fiction error as well as a cost |
 | S5 | **The band aligns with the disc plane** | S | One coherent geometry instead of two unrelated ones | **Do it.** It is a two-line change and it makes the whole frame agree with itself |
 
@@ -165,7 +165,7 @@ Costs are rough: **S** is an afternoon, **M** is a day or two, **L** is a week o
 
 | # | Idea | Cost | Buys | Verdict |
 |---|---|---|---|---|
-| L1 | **The core lights the field** — particles tinted by proximity and angle to the core | M | Enormous coherence win. Right now the light comes from the upper left and the star in the middle emits nothing | **Do it.** Once the core is a star, it *is* the light source, and everything currently ignores that |
+| L1 | ~~**The core lights the field**~~ — **done** for rocks | M | Enormous coherence win | Built cheaply: the rock sprites have their light painted in, so around a star each one turns its lit side to the core, and around a dark body it keeps the light where the body has it. They no longer tumble, which had been turning their sunlight round with them |
 | L2 | **Bloom / HDR** | M | Glow | **No,** for the reasons in §1. The corona and halo already do this, in the shader, where it is controlled |
 | L3 | **A tighter palette per act** | S | Identity | Do it as a pass over `StageLook`, not as code |
 | L4 | **Colour-blind safe tints** | S | Reach | Do it as part of the ship phase. The ladder currently leans on hue alone in two places |
@@ -174,9 +174,9 @@ Costs are rough: **S** is an afternoon, **M** is a day or two, **L** is a week o
 
 | # | Idea | Cost | Buys | Verdict |
 |---|---|---|---|---|
-| U1 | **Mobile layout** | M | The genre lives on phones. There is currently no phone layout at all | **The highest-value item in this entire document.** It is not a visual nicety, it is the platform |
-| U2 | **Number formatting people can read at a glance** | S | Already good; could be better with a fixed-width column | Small |
-| U3 | **An "at a glance" collapsed mode** — the field and one number | S | For leaving it on a second monitor | Nice, cheap, fits the zen direction |
+| U1 | ~~**Mobile layout**~~ — **done** | M | The genre lives on phones | Built with the zen redesign: the field is the whole screen, the margin is one caption, and the sheet comes up from the bottom on a phone. A browser test holds the phone viewport to no sideways scroll |
+| U2 | ~~**Number formatting people can read at a glance**~~ — **done** | S | | Numbers are words by default — `4.15 billion` — and the caption repaints once a second |
+| U3 | ~~**An "at a glance" collapsed mode**~~ — **done**, as the default | S | For leaving it on a second monitor | The whole interface is this now: the field, one caption, and a sheet you summon. It dims when you stop moving |
 | U4 | **Animated number counters** | S | — | No. It makes a calm readout twitchy |
 | U5 | **Tooltips explaining the astrophysics** | S | The game's best asset is that it is *true*, and it currently never says so | **Do it.** One line per stage and per element |
 
@@ -184,27 +184,30 @@ Costs are rough: **S** is an afternoon, **M** is a day or two, **L** is a week o
 
 | # | Idea | Cost | Buys | Verdict |
 |---|---|---|---|---|
-| M1 | **Promotion sequence** — the field visibly reorganises over a few seconds | M | Promotions are the spine of the run and currently pass as a crossfade and a banner | **Do it.** It is the second-biggest payoff after the supernova |
-| M2 | **Pulse feedback** — the existing ring, but shaped by the disc | S | The one interaction in the game should feel like it lands | Do it |
+| M1 | **Promotion sequence** — the field visibly reorganises over a few seconds | M | Promotions are the spine of the run | **Partly done:** the morph now takes several seconds rather than one, and the banner became a line that fades. A choreographed sequence is still open |
+| M2 | ~~**Pulse feedback**~~ — superseded | S | | The pulse no longer pays, so it became a stir: a ripple where you touched and a swirl in what is near it |
 | M3 | **Idle breathing on everything** | S | Already there on the core | Leave it |
 
 ### 3.8 Sound
 
 | # | Idea | Cost | Buys | Verdict |
 |---|---|---|---|---|
-| A1 | **Ambient drone that changes by stage** | M | The single cheapest way to make a quiet game feel deep | Do it, muted by default. Autoplay policy requires it anyway |
+| A1 | ~~**Ambient drone that changes by stage**~~ — **done** | M | The single cheapest way to make a quiet game feel deep | Generated, off until asked for: the root walks down a pentatonic as the body grows, with sparse notes over it |
 | A2 | **A note on absorption** | S | — | No. At hundreds of absorptions a second it is a machine gun |
-| A3 | **One sound for the supernova** | S | Punctuation on the one big moment | Do it, with the sequence |
+| A3 | ~~**One sound for the supernova**~~ — **done**, as a bell | S | Punctuation | A bell, inharmonic like a struck bar, marks a promotion and a star let go |
 
 ---
 
 ## 4. If I had to order it
 
 1. ~~**F1, depth sorting.**~~ Done — the disc is a ring, and transits happen.
-2. **U1, mobile layout.** Not a visual choice. The platform.
-3. **B5, the supernova sequence.** The biggest moment has the least made of it.
-4. **L1, the core as light source.** The largest coherence win available.
-5. **C1, slow zoom.** The best answer to late-game scale.
-6. **M1, promotion sequence**, then **B1/B2 rings and moons**, then **S1/S2 sky depth**.
+2. ~~**U1, mobile layout.**~~ Done, with the zen redesign: one caption and a sheet you summon.
+3. ~~**B5, the supernova sequence.**~~ Done, as the release — and decided by the star's mass.
+4. ~~**L1, the core as light source.**~~ Done for the rocks, which turn their lit side to it.
+5. **C1, slow zoom.** Now the best remaining answer to late-game scale.
+6. **M1, a choreographed promotion**, then **B1/B2 rings and moons**, then **S1 parallax**.
 
 Everything in §3 marked *No* should stay that way unless the reason it was rejected changes.
+The zen redesign added one more principle to §2, and it has held so far: **a moment is slow.**
+A promotion takes several seconds; letting a star go takes ten; the sky takes two hours to
+turn. Nothing on the screen should change faster than it can be watched.

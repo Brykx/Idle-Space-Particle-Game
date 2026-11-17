@@ -212,6 +212,21 @@ and this is that sentence taken literally.
 - **Sound, if you want it.** A generated drone that follows the stage, a few sparse notes, a
   bell when something changes. Off until asked for.
 
+### As built
+
+All of the above is built. Where the build differs from the plan, the build won:
+
+- **Your stars are scattered over the whole turning sky**, not kept inside the circle that
+  never leaves the screen. That was tried first and drew them as a ring round the middle,
+  which no sky looks like; now they rise past the edge and set again.
+- **Hot stars are smooth because the shader reads their temperature from their colour.** The
+  first star shader multiplied every class by the red dwarf's colour ramp, which rendered the
+  Sun tan and blue stars beige.
+- **Rocks stopped tumbling.** Their light is painted on, so tumbling turned their sunlit side
+  round with them; around a star each turns its lit side to the core instead.
+- **The automation's horizon is relative.** A flat hour throttled the vast, slow clouds,
+  where nearly every sound purchase takes longer than that to repay.
+
 ## 5. Deliberately not done
 
 - **Forks at promotions** — rings or moons, ocean or desert. Good, and the natural next
