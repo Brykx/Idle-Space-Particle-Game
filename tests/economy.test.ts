@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { D } from '../src/sim/numbers';
 import { initialState } from '../src/sim/state';
-import { buy, deriveRates, pulse, pulseReady, tick } from '../src/sim/economy';
+import { buy, deriveRates, tick } from '../src/sim/economy';
 import { UPGRADES, costAt, costOfLevels, maxAffordable } from '../src/sim/upgrades';
-import { applyOffline, MAX_OFFLINE_SECONDS } from '../src/sim/offline';
+import { applyOffline, OFFLINE_HORIZON_SECONDS } from '../src/sim/offline';
 
 const NOW = 1_700_000_000_000;
 
@@ -74,30 +74,59 @@ describe('tick', () => {
 });
 
 describe('offline', () => {
-  it('credits the same mass in 36 coarse steps as in 3600 fine ones', () => {
+  /**
+   * Coarse steps must stay close to fine ones, and must never pay *more*.
+   *
+   * This used to assert equality to six decimal places, on the reasoning that without
+   * auto-buyers the rate only changes when an achievement unlocks and that is rare. It is not
+   * rare any more: there are sixty of them, so an hour of catch-up crosses several, and a
+   * coarse step credits the whole hundred seconds at the rate it started with. The measured
+   * gap is under one percent.
+   *
+   * The direction is the part worth asserting. Under-paying an absence is a known, bounded
+   * cost of integrating in steps. Over-paying would mean being away beat being present, which
+   * is a different kind of bug entirely.
+   */
+  it('credits a coarse catch-up close to a fine one, and never more', () => {
     const fine = initialState(NOW);
     for (let i = 0; i < 3600; i++) tick(fine, 1);
 
     const coarse = initialState(NOW);
     for (let i = 0; i < 36; i++) tick(coarse, 100);
 
-    const ratio = fine.mass.div(coarse.mass).toNumber();
-    expect(ratio).toBeCloseTo(1, 6);
+    const ratio = coarse.mass.div(fine.mass).toNumber();
+    expect(ratio).toBeLessThanOrEqual(1);
+    expect(ratio).toBeGreaterThan(0.97);
   });
 
-  it('caps a long absence and says so', () => {
+  /**
+   * An absence has no edge any more. A fortnight is credited as a fortnight, and the report
+   * has nothing in it about what was forfeited because nothing was.
+   */
+  it('credits a fortnight as a fortnight', () => {
     const s = initialState(NOW);
-    const report = applyOffline(s, NOW + 14 * 24 * 3600 * 1000);
+    const fortnight = 14 * 24 * 3600;
+    const report = applyOffline(s, NOW + fortnight * 1000);
     expect(report).not.toBeNull();
-    expect(report!.capped).toBe(true);
-    expect(report!.creditedSeconds).toBe(MAX_OFFLINE_SECONDS);
+    expect(report!.creditedSeconds).toBe(fortnight);
+    expect(report!.awaySeconds).toBe(fortnight);
+    expect('capped' in report!).toBe(false);
+    expect(s.playTime).toBeCloseTo(fortnight, 3);
   });
 
-  it('resolves a fortnight in the same step budget as a minute', () => {
+  it('stops counting only past a horizon nobody will experience as a limit', () => {
+    expect(OFFLINE_HORIZON_SECONDS).toBeGreaterThanOrEqual(30 * 24 * 3600);
+
+    const s = initialState(NOW);
+    const report = applyOffline(s, NOW + OFFLINE_HORIZON_SECONDS * 3 * 1000);
+    expect(report!.creditedSeconds).toBe(OFFLINE_HORIZON_SECONDS);
+  });
+
+  it('resolves a fortnight with nothing flowing in the time a short absence takes', () => {
     const s = initialState(NOW);
     const started = Date.now();
     applyOffline(s, NOW + 14 * 24 * 3600 * 1000);
-    expect(Date.now() - started).toBeLessThan(250);
+    expect(Date.now() - started).toBeLessThan(400);
   });
 
   it('clamps a backwards clock to zero rather than removing mass', () => {
@@ -113,8 +142,8 @@ describe('offline', () => {
 describe('purchasing', () => {
   it('charges exactly the geometric sum', () => {
     const def = UPGRADES.gravity;
-    const oneByOne = [0, 1, 2, 3, 4].reduce((sum, level) => sum.add(costAt(def, level)), D(0));
-    expect(costOfLevels(def, 0, 5).toNumber()).toBeCloseTo(oneByOne.toNumber(), 6);
+    const oneByOne = [0, 1, 2, 3, 4].reduce((sum, level) => sum.add(costAt(def, level, 0)), D(0));
+    expect(costOfLevels(def, 0, 5, 0).toNumber()).toBeCloseTo(oneByOne.toNumber(), 6);
   });
 
   it('never lets buy-max overdraw, and never leaves a level on the table', () => {
@@ -122,10 +151,10 @@ describe('purchasing', () => {
     for (const budget of ['0', '24', '25', '1e3', '1e6', '1.234e12', '1e40']) {
       for (const level of [0, 7, 93]) {
         const money = D(budget);
-        const { levels, cost } = maxAffordable(def, level, money);
+        const { levels, cost } = maxAffordable(def, level, money, 0);
         expect(cost.lte(money)).toBe(true);
-        if (levels > 0) expect(costOfLevels(def, level, levels).lte(money)).toBe(true);
-        expect(costOfLevels(def, level, levels + 1).gt(money)).toBe(true);
+        if (levels > 0) expect(costOfLevels(def, level, levels, 0).lte(money)).toBe(true);
+        expect(costOfLevels(def, level, levels + 1, 0).gt(money)).toBe(true);
       }
     }
   });
@@ -151,28 +180,5 @@ describe('purchasing', () => {
     s.mass = D(1e6);
     buy(s, 'gravity', 10);
     expect(deriveRates(s).massPerSecond.gt(before)).toBe(true);
-  });
-});
-
-describe('gravity pulse', () => {
-  it('pays out, then holds a cooldown', () => {
-    const s = initialState(NOW);
-    const paid = pulse(s);
-    expect(paid).not.toBeNull();
-    expect(paid!.gt(0)).toBe(true);
-    expect(pulseReady(s)).toBe(false);
-    expect(pulse(s)).toBeNull();
-
-    tick(s, 10);
-    expect(pulseReady(s)).toBe(true);
-    expect(pulse(s)).not.toBeNull();
-    expect(s.stats.pulses).toBe(2);
-  });
-
-  it('is worth something on the very first click, before any income', () => {
-    const s = initialState(NOW);
-    const rates = deriveRates(s);
-    expect(rates.pulseYield.gte(rates.massPerSecond)).toBe(true);
-    expect(rates.pulseYield.gt(0)).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import { D, type Num } from './numbers';
+import { costScaleAt } from './stages';
 
 /**
  * Upgrades are data, not code.
@@ -39,6 +40,15 @@ export interface UpgradeDef {
   growth: number;
   /** Revealed once total mass ever earned passes this. */
   unlockAt: Num;
+  /**
+   * Whether this upgrade resets to level 0 at each promotion and reprices to the new stage.
+   *
+   * A rebased upgrade is the same card mattering again, twelve times, instead of one card
+   * you finish with. It is not free: an upgrade that resets stops compounding across the run,
+   * so whatever it used to contribute has to be paid back somewhere — see PROMOTION_MULTIPLIER
+   * in `economy.ts`. Shipping a rebase without that payback turns the late game into a wall.
+   */
+  rebased?: true;
   /** Human-readable description of what the next level buys. */
   perLevel: string;
 }
@@ -75,6 +85,10 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
     baseCost: D(30),
     growth: 1.685,
     unlockAt: D(20),
+    // Density is the count of particles, and climbing the ladder is exactly the thing that
+    // makes them fewer and bigger. Resetting this card at each promotion is the mechanic
+    // agreeing with the picture: the flow coarsens, and you rebuild it from a coarser floor.
+    rebased: true,
     perLevel: 'x1.165 particles/s',
   },
   particleMass: {
@@ -144,19 +158,33 @@ export const MASS_UPGRADE_IDS = UPGRADE_IDS.filter((id) => UPGRADES[id].currency
 
 export const UPGRADE_LIST: UpgradeDef[] = UPGRADE_IDS.map((id) => UPGRADES[id]);
 
+/** The ids that reset and reprice at every promotion. */
+export const REBASED_UPGRADE_IDS = UPGRADE_IDS.filter((id) => UPGRADES[id].rebased);
+
+/**
+ * What this upgrade costs at a stage, before levels.
+ *
+ * `stage` is required rather than defaulted throughout this file. A default of zero would be
+ * silently wrong for every rebased upgrade, and wrong in the direction that is hardest to
+ * notice: too cheap.
+ */
+function baseAt(def: UpgradeDef, stage: number): Num {
+  return def.rebased ? def.baseCost.mul(costScaleAt(stage)) : def.baseCost;
+}
+
 /** Cost of the single next level, given how many you already own. */
-export function costAt(def: UpgradeDef, level: number): Num {
-  return def.baseCost.mul(D(def.growth).pow(level));
+export function costAt(def: UpgradeDef, level: number, stage: number): Num {
+  return baseAt(def, stage).mul(D(def.growth).pow(level));
 }
 
 /**
  * Cost of `count` levels starting from `level` — the geometric sum, in closed form, so
  * "buy max" stays instant at level 400.
  */
-export function costOfLevels(def: UpgradeDef, level: number, count: number): Num {
+export function costOfLevels(def: UpgradeDef, level: number, count: number, stage: number): Num {
   if (count <= 0) return D(0);
   const g = D(def.growth);
-  return costAt(def, level).mul(g.pow(count).sub(1)).div(g.sub(1));
+  return costAt(def, level, stage).mul(g.pow(count).sub(1)).div(g.sub(1));
 }
 
 export interface Purchase {
@@ -170,8 +198,8 @@ export interface Purchase {
  * Inverts the geometric sum, then walks back if the logarithm rounded us one level too
  * generous — the caller is spending real currency and must never overdraw.
  */
-export function maxAffordable(def: UpgradeDef, level: number, budget: Num): Purchase {
-  const next = costAt(def, level);
+export function maxAffordable(def: UpgradeDef, level: number, budget: Num, stage: number): Purchase {
+  const next = costAt(def, level, stage);
   if (budget.lt(next)) return { levels: 0, cost: D(0) };
 
   const g = def.growth;
@@ -180,14 +208,14 @@ export function maxAffordable(def: UpgradeDef, level: number, budget: Num): Purc
   if (!Number.isFinite(k) || k < 1) k = 1;
 
   // Trust the closed form, verify the boundary.
-  let cost = costOfLevels(def, level, k);
+  let cost = costOfLevels(def, level, k, stage);
   while (k > 1 && cost.gt(budget)) {
     k -= 1;
-    cost = costOfLevels(def, level, k);
+    cost = costOfLevels(def, level, k, stage);
   }
-  while (costOfLevels(def, level, k + 1).lte(budget)) {
+  while (costOfLevels(def, level, k + 1, stage).lte(budget)) {
     k += 1;
-    cost = costOfLevels(def, level, k);
+    cost = costOfLevels(def, level, k, stage);
   }
 
   return { levels: k, cost };

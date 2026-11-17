@@ -1,7 +1,9 @@
 import { D, type Notation, type Num } from './numbers';
 import { UPGRADE_IDS, type UpgradeId } from './upgrades';
+import { STARDUST_IDS, type StardustId, type StarRecord } from './sky';
+import { firstCloud, mix, type Cloud } from './clouds';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 5;
 
 export interface Settings {
   notation: Notation;
@@ -13,12 +15,15 @@ export interface Settings {
    * hand while automation handles the cheap end. 0 means they spend freely.
    */
   autoBuyReserve: number;
+  /** Generated ambience. Off until asked for: a game that makes noise uninvited is asking. */
+  sound: boolean;
+  /** 0..1. */
+  volume: number;
 }
 
 export interface Stats {
   /** Wall-clock ms when this save was first created. */
   startedAt: number;
-  pulses: number;
   purchases: number;
   /** Longest single absence, in seconds. Achievements read it; nothing else does. */
   longestAway: number;
@@ -34,30 +39,77 @@ export interface GameState {
   energy: Num;
   totalEnergyEver: Num;
   levels: Record<UpgradeId, number>;
+  /**
+   * Levels ever bought, per upgrade. Never decreases, not even at a promotion.
+   *
+   * `levels` is what the economy reads; this is what *investment* reads. They were the same
+   * number until Density started resetting, at which point deriving the auto-buy unlock from
+   * the current level began confiscating an auto-buyer the player had already earned, once
+   * per promotion. Splitting them keeps one rule for every upgrade instead of an exception
+   * for the rebased ones.
+   */
+  levelsEver: Record<UpgradeId, number>;
   /** Seconds of simulated time. The sim's only clock — no wall clock in here. */
   playTime: number;
-  /** `playTime` at which Gravity Pulse becomes available again. */
-  pulseReadyAt: number;
   /** Highest stage the player has been told about, so each one announces itself once. */
   stageSeen: number;
-  /** Which upgrades buy themselves. Unlocking is derived from level, so it is not stored. */
+  /**
+   * The ladder stage the rebased upgrade levels belong to.
+   *
+   * Distinct from `stageSeen`, which is a UI acknowledgement. This one is a simulation fact:
+   * it records that the reset has already happened for that stage, so a promotion cannot be
+   * applied twice and cannot be missed across a reload.
+   */
+  rebasedStage: number;
+  /**
+   * Which currents are allowed to flow. True unless the player is holding one back.
+   *
+   * It says nothing about whether a current has been *opened* — that is derived from
+   * `levelsEver`, so it is not stored twice. A current flows when it is both.
+   */
   autoBuy: Record<UpgradeId, boolean>;
-  /** Ids of unlocked achievements. */
+  /** Ids of unlocked achievements. Survive a collapse; they record what you did. */
   achievements: string[];
+
+  // --- the run --------------------------------------------------------------------------
+  /**
+   * The cloud this star is condensing from, or null between stars while the next is chosen.
+   * Null is a real state, not a missing value: it is the one moment the field is empty.
+   */
+  cloud: Cloud | null;
+  /** `playTime` when this star's cloud was chosen. */
+  runStartedAt: number;
+
+  // --- what a star leaves --------------------------------------------------------------
+  /** Seeds every draw this save makes — clouds, names, places in the sky — so none rerolls. */
+  skySeed: number;
+  /** Every star you have let go, in the order you made them. */
+  sky: StarRecord[];
+  /**
+   * Unspent Stardust. A plain number: it is paid in orders of magnitude, bounded by the
+   * cloud, so a lifetime of it fits comfortably in a double.
+   */
+  stardust: number;
+  /** Ever earned. Drives achievements and the "how far have you come" readouts. */
+  stardustEver: number;
+  stardustLevels: Record<StardustId, number>;
   /** Wall-clock ms at the last save. The one bridge to real time, used for offline catch-up. */
   lastSeen: number;
   settings: Settings;
   stats: Stats;
 }
 
-export const PULSE_COOLDOWN = 10;
-
 export function initialState(now = Date.now()): GameState {
   const levels = {} as Record<UpgradeId, number>;
+  const levelsEver = {} as Record<UpgradeId, number>;
   const autoBuy = {} as Record<UpgradeId, boolean>;
+  const stardustLevels = {} as Record<StardustId, number>;
+  for (const id of STARDUST_IDS) stardustLevels[id] = 0;
   for (const id of UPGRADE_IDS) {
     levels[id] = 0;
-    autoBuy[id] = false;
+    levelsEver[id] = 0;
+    // Flowing is the default. Holding a current back is the exception you opt into.
+    autoBuy[id] = true;
   }
 
   return {
@@ -67,21 +119,32 @@ export function initialState(now = Date.now()): GameState {
     energy: D(0),
     totalEnergyEver: D(0),
     levels,
+    levelsEver,
     playTime: 0,
-    pulseReadyAt: 0,
     stageSeen: 0,
+    rebasedStage: 0,
     autoBuy,
     achievements: [],
+    cloud: firstCloud(),
+    runStartedAt: 0,
+    // From the creation time, so a fresh save is reproducible in tests and different for
+    // every player in practice.
+    skySeed: mix(now % 0x1_0000_0000, Math.floor(now / 0x1_0000_0000)),
+    sky: [],
+    stardust: 0,
+    stardustEver: 0,
+    stardustLevels,
     lastSeen: now,
     settings: {
-      notation: 'letters',
+      notation: 'words',
       particleBudget: 1200,
       reducedMotion: false,
       autoBuyReserve: 0,
+      sound: false,
+      volume: 0.6,
     },
     stats: {
       startedAt: now,
-      pulses: 0,
       purchases: 0,
       longestAway: 0,
       exports: 0,
@@ -98,8 +161,12 @@ export function cloneState(s: GameState): GameState {
     energy: D(s.energy),
     totalEnergyEver: D(s.totalEnergyEver),
     levels: { ...s.levels },
+    levelsEver: { ...s.levelsEver },
     autoBuy: { ...s.autoBuy },
     achievements: [...s.achievements],
+    cloud: s.cloud ? { ...s.cloud } : null,
+    sky: s.sky.map((star) => ({ ...star })),
+    stardustLevels: { ...s.stardustLevels },
     settings: { ...s.settings },
     stats: { ...s.stats },
   };

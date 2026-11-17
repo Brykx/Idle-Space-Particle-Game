@@ -2,77 +2,233 @@ import { describe, expect, it } from 'vitest';
 import { D } from '../src/sim/numbers';
 import { initialState, type GameState } from '../src/sim/state';
 import {
-  AUTO_BUY_LEVEL,
-  autoBuyUnlocked,
   awardAchievements,
+  buy,
   deriveRates,
+  isFlowing,
+  isOpen,
+  levelGain,
+  nextCost,
+  paybackHorizon,
+  paybackSeconds,
   runAutoBuyers,
   tick,
 } from '../src/sim/economy';
 import { ACHIEVEMENTS, multiplierFor } from '../src/sim/achievements';
+import { stageIndexFor } from '../src/sim/stages';
+import { firstCloud, type Cloud } from '../src/sim/clouds';
 import { applyOffline } from '../src/sim/offline';
 import { deserialize, serialize } from '../src/sim/save';
-import { UPGRADES, UPGRADE_IDS, costAt } from '../src/sim/upgrades';
+import { MASS_UPGRADE_IDS, UPGRADES, UPGRADE_IDS, costOfLevels, type UpgradeId } from '../src/sim/upgrades';
 
 const NOW = 1_700_000_000_000;
 
-function armed(levels: Partial<Record<(typeof UPGRADE_IDS)[number], number>> = {}): GameState {
+/**
+ * A state with every current opened and flowing, at a place on the ladder the game reaches.
+ *
+ * Rebased upgrades are left at level 0, because that is the only thing they can be just
+ * after a promotion, and every caller here sets a lifetime mass well up the ladder. Arming
+ * Density at level 25 at the Planet stage produced a state the game cannot reach, and priced
+ * its next level so far out of range that it looked like the automation was broken.
+ *
+ * `levelsEver` still carries the investment, which is what "open" reads.
+ */
+function flowing(levels: Partial<Record<UpgradeId, number>> = {}): GameState {
   const s = initialState(NOW);
   for (const id of UPGRADE_IDS) {
-    s.levels[id] = levels[id] ?? AUTO_BUY_LEVEL;
+    const level = levels[id] ?? 25;
+    s.levels[id] = UPGRADES[id].rebased ? 0 : level;
+    s.levelsEver[id] = Math.max(1, level);
     s.autoBuy[id] = true;
   }
   return s;
 }
 
-describe('auto-buyers', () => {
-  it('stay locked until you have invested in that upgrade by hand', () => {
+/**
+ * A cloud large enough that nothing here comes near spending it. The integration tests are
+ * about how income compounds, and a run that finishes inside the window measures the cap
+ * instead — both sides arrive at the same finished star, and agree for the wrong reason.
+ */
+const VAST: Cloud = { ...firstCloud(), ceiling: 'blueSupergiant' };
+
+/** Twenty minutes of a real run: every current opened as soon as it can be, then left alone. */
+function played(seconds = 1200): GameState {
+  const s = initialState(NOW);
+  for (let t = 0; t < seconds; t += 0.5) {
+    for (const id of UPGRADE_IDS) if (!isOpen(s, id)) buy(s, id, 1);
+    tick(s, 0.5);
+  }
+  return s;
+}
+
+describe('a current', () => {
+  it('does not flow until you have begun it by hand, and then it does', () => {
     const s = initialState(NOW);
-    s.autoBuy.gravity = true;
     s.mass = D('1e12');
     s.totalMassEver = D('1e12');
 
-    expect(autoBuyUnlocked(s, 'gravity')).toBe(false);
+    // Flowing is the default, so the only thing in the way is that it has never been opened.
+    expect(s.autoBuy.gravity).toBe(true);
+    expect(isOpen(s, 'gravity')).toBe(false);
     expect(runAutoBuyers(s)).toBe(0);
 
-    s.levels.gravity = AUTO_BUY_LEVEL;
-    expect(autoBuyUnlocked(s, 'gravity')).toBe(true);
+    expect(buy(s, 'gravity', 1)).toBe(1);
+    expect(isOpen(s, 'gravity')).toBe(true);
+    expect(isFlowing(s, 'gravity')).toBe(true);
     expect(runAutoBuyers(s)).toBeGreaterThan(0);
   });
 
-  it('does nothing for an upgrade that is switched off', () => {
-    const s = armed();
+  it('stays open through a promotion that takes its levels away', () => {
+    const s = initialState(NOW);
+    s.mass = D(1e4);
+    s.totalMassEver = D(50);
+    buy(s, 'density', 1);
+    expect(s.levels.density).toBe(1);
+
+    s.totalMassEver = D(150);
+    tick(s, 0.05);
+    expect(s.rebasedStage, 'promoted').toBe(1);
+    expect(isOpen(s, 'density'), 'still open').toBe(true);
+  });
+
+  it('does nothing while it is held', () => {
+    const s = flowing();
     for (const id of UPGRADE_IDS) s.autoBuy[id] = false;
     s.mass = D('1e12');
     s.totalMassEver = D('1e12');
 
     expect(runAutoBuyers(s)).toBe(0);
-    expect(s.levels.gravity).toBe(AUTO_BUY_LEVEL);
+    expect(s.levels.gravity).toBe(25);
   });
+});
 
-  it('spends until nothing enabled is affordable, spreading across upgrades', () => {
-    const s = armed();
+describe('what the automation buys', () => {
+  it('stops only when nothing worth buying is affordable', () => {
+    const s = flowing();
     s.mass = D('1e9');
     s.totalMassEver = D('1e9');
+    s.rebasedStage = stageIndexFor(s.totalMassEver);
     runAutoBuyers(s);
 
-    // The invariant: it stops only when it cannot buy. An upgrade may be untouched simply
-    // because it is far too expensive — Accretion Efficiency costs ~1e17 at this level — so
-    // the test is about what is left affordable, not about every upgrade moving.
-    for (const id of UPGRADE_IDS) {
-      expect(costAt(UPGRADES[id], s.levels[id]).gt(s.mass), `${id} still affordable`).toBe(true);
+    // The invariant has two halves now. A card is left alone either because it cannot be
+    // paid for or because it would not repay itself inside the horizon — and nothing else.
+    const rates = deriveRates(s);
+    for (const id of MASS_UPGRADE_IDS) {
+      const affordable = nextCost(s, id).lte(s.mass);
+      const worthIt = paybackSeconds(s, id, rates) <= paybackHorizon(s, rates);
+      expect(affordable && worthIt, `${id} was affordable and worth buying`).toBe(false);
     }
+  });
 
-    // And buying the cheapest raises its cost, so spending spreads rather than piling in.
-    const moved = UPGRADE_IDS.filter((id) => s.levels[id] > AUTO_BUY_LEVEL);
-    expect(moved.length).toBeGreaterThan(2);
+  /**
+   * The difference between this automation and the one it replaced, on one state.
+   *
+   * Gravity Well at level 10 is the cheaper card and the worse purchase: 345 mass for under
+   * six percent, against 750 for a third more of everything. Cheapest-first took the cheap one.
+   */
+  it('takes the purchase that repays soonest, not the cheapest', () => {
+    const s = initialState(NOW);
+    s.totalMassEver = D(1500);
+    s.rebasedStage = stageIndexFor(s.totalMassEver);
+    s.levels.gravity = 10;
+    s.levelsEver.gravity = 10;
+    s.levelsEver.efficiency = 1;
+    s.mass = D(800);
+
+    const rates = deriveRates(s);
+    expect(nextCost(s, 'gravity').lt(nextCost(s, 'efficiency')), 'gravity is the cheaper card').toBe(true);
+    expect(paybackSeconds(s, 'efficiency', rates)).toBeLessThan(paybackSeconds(s, 'gravity', rates));
+
+    runAutoBuyers(s);
+    expect(s.levels.efficiency).toBe(1);
+    expect(s.levels.gravity).toBe(10);
+  });
+
+  /**
+   * The card that used to eat the run. Capture saturates towards 1 and never arrives, so a
+   * level of Gravity Well is always worth *something* — at level 60, about a millionth.
+   */
+  it('leaves a card alone once it would not repay itself within its horizon', () => {
+    const s = initialState(NOW);
+    s.totalMassEver = D(1500);
+    s.rebasedStage = stageIndexFor(s.totalMassEver);
+    s.levels.gravity = 60;
+    s.levelsEver.gravity = 60;
+    s.mass = nextCost(s, 'gravity').mul(10);
+
+    const rates = deriveRates(s);
+    expect(paybackSeconds(s, 'gravity', rates)).toBeGreaterThan(paybackHorizon(s, rates));
+    expect(runAutoBuyers(s), 'affordable ten times over, and not bought').toBe(0);
+
+    // Settled is a statement about now, not a lock: when income has grown enough that the
+    // same level repays itself in time, it is bought again.
+    s.levels.particleMass = 200;
+    const richer = deriveRates(s);
+    expect(paybackSeconds(s, 'gravity', richer)).toBeLessThan(paybackHorizon(s, richer));
+    expect(runAutoBuyers(s)).toBeGreaterThan(0);
+    expect(s.levels.gravity).toBeGreaterThan(60);
+  });
+
+  /**
+   * A slow cloud is judged in its own time. The horizon is a number of the run's own tenfolds,
+   * so the same purchase in a cloud thirty times thinner may take thirty times as long to
+   * repay and still be the right thing to buy.
+   */
+  it('judges a slow cloud by its own pace, not by the clock', () => {
+    const at = (pace: number) => {
+      const s = flowing();
+      s.cloud = { ...VAST, pace };
+      s.totalMassEver = D('1e12');
+      s.rebasedStage = stageIndexFor(s.totalMassEver);
+      return paybackHorizon(s, deriveRates(s));
+    };
+    expect(at(0.03) / at(1)).toBeCloseTo(1 / 0.03, 1);
+    expect(at(1)).toBeGreaterThan(300);
+  });
+
+  /**
+   * The measured failure this replaces: left to itself, the old automation put more than half
+   * of everything it spent into the two capture cards while they read +0.00%.
+   */
+  it('does not pour a run into the cards that have saturated', () => {
+    const s = played(2400);
+
+    const spent = (id: UpgradeId) =>
+      UPGRADES[id].rebased ? 0 : costOfLevels(UPGRADES[id], 0, s.levels[id], 0).toNumber();
+    const capture = spent('gravity') + spent('radius');
+    const growth = spent('particleMass') + spent('efficiency');
+
+    expect(deriveRates(s).captureFraction, 'capture is all but saturated by now').toBeGreaterThan(0.95);
+    expect(capture / (capture + growth)).toBeLessThan(0.1);
+  });
+
+  it('touches every mass current over a run', () => {
+    const s = played();
+    // More than the one level that opened it: the rest were bought for you.
+    for (const id of MASS_UPGRADE_IDS) {
+      expect(s.levelsEver[id], `${id} levels bought`).toBeGreaterThan(1);
+    }
+  });
+
+  it('buys the energy side whenever it can be paid for', () => {
+    const s = flowing({ disk: 0, confinement: 0, magnetic: 0 });
+    s.totalMassEver = D('1e9');
+    s.rebasedStage = stageIndexFor(s.totalMassEver);
+    s.energy = D('1e6');
+    runAutoBuyers(s);
+
+    expect(s.levels.disk + s.levels.confinement + s.levels.magnetic).toBeGreaterThan(0);
+    for (const id of ['disk', 'confinement', 'magnetic'] as const) {
+      expect(nextCost(s, id).gt(s.energy), `${id} still affordable`).toBe(true);
+    }
   });
 
   it('honours the reserve, leaving mass for a manual purchase', () => {
     const spent = (reserve: number) => {
-      const s = armed();
+      const s = flowing();
       s.mass = D(1e6);
       s.totalMassEver = D('1e9');
+      s.rebasedStage = stageIndexFor(s.totalMassEver);
       s.settings.autoBuyReserve = reserve;
       runAutoBuyers(s);
       return D(1e6).sub(s.mass).toNumber();
@@ -83,21 +239,51 @@ describe('auto-buyers', () => {
   });
 
   it('never overdraws', () => {
-    const s = armed();
+    const s = flowing();
     s.mass = D(5000);
     s.totalMassEver = D('1e9');
     runAutoBuyers(s);
     expect(s.mass.sign()).toBeGreaterThanOrEqual(0);
   });
+});
 
+describe('what a level is worth', () => {
+  /**
+   * The automation's estimate is a closed form so it can be asked thousands of times a
+   * second. This holds it against the slow, obviously-correct answer: change the level, derive
+   * everything again, and look at what income did.
+   */
+  it('agrees with deriving the rates again, for every mass current', () => {
+    for (const base of [initialState(NOW), flowing(), flowing({ gravity: 3, radius: 40 }), played(600)]) {
+      const rates = deriveRates(base);
+      for (const id of MASS_UPGRADE_IDS) {
+        const probe: GameState = { ...base, levels: { ...base.levels, [id]: base.levels[id] + 1 } };
+        const measured = deriveRates(probe).massPerSecond.div(rates.massPerSecond).toNumber() - 1;
+        expect(levelGain(id, rates), id).toBeCloseTo(measured, 9);
+      }
+    }
+  });
+
+  it('is zero for the energy side, whose value arrives in steps', () => {
+    const rates = deriveRates(flowing());
+    for (const id of ['disk', 'confinement', 'magnetic'] as const) {
+      expect(levelGain(id, rates)).toBe(0);
+      expect(paybackSeconds(flowing(), id, rates)).toBe(Infinity);
+    }
+  });
+});
+
+describe('an absence', () => {
   it('resolves a fortnight away without stalling', () => {
-    const s = armed();
+    const s = flowing();
+    s.cloud = { ...VAST, pace: 0.05 };
     s.mass = D('1e6');
     s.totalMassEver = D('1e9');
+    s.rebasedStage = stageIndexFor(s.totalMassEver);
 
     const started = Date.now();
     applyOffline(s, NOW + 14 * 24 * 3600 * 1000);
-    expect(Date.now() - started).toBeLessThan(2000);
+    expect(Date.now() - started).toBeLessThan(4000);
     expect(s.stats.purchases).toBeGreaterThan(0);
   });
 
@@ -107,19 +293,23 @@ describe('auto-buyers', () => {
    * integrates in coarser steps than the 20 Hz loop — but the gap has to stay small, or
    * closing the tab quietly becomes a penalty.
    */
-  it('pays an absence roughly what being present would have paid', () => {
-    const present = armed();
+  it('pays roughly what being present would have paid', () => {
+    const present = flowing();
+    present.cloud = { ...VAST };
     present.mass = D(1e4);
     present.totalMassEver = D('1e9');
+    present.rebasedStage = stageIndexFor(present.totalMassEver);
     // Being away earns "Absent Landlord", and a 2% global multiplier applied for a whole run
     // is worth around half an order of magnitude — it scales the growth rate, not just the
     // total. Give both sides the same achievements so this measures integration error only.
     present.stats.longestAway = 3600;
-    for (let i = 0; i < 3600; i++) tick(present, 1);
+    for (let i = 0; i < 72_000; i++) tick(present, 0.05);
 
-    const away = armed();
+    const away = flowing();
+    away.cloud = { ...VAST };
     away.mass = D(1e4);
     away.totalMassEver = D('1e9');
+    away.rebasedStage = stageIndexFor(away.totalMassEver);
     applyOffline(away, NOW + 3600_000);
 
     // Measured against what was *gained*, not in absolute orders of magnitude. An hour of
@@ -129,7 +319,8 @@ describe('auto-buyers', () => {
     const start = 9; // log10 of the seeded totalMassEver
     const gainedPresent = present.totalMassEver.log10() - start;
     const gainedAway = away.totalMassEver.log10() - start;
-    expect(Math.abs(gainedPresent - gainedAway) / gainedPresent).toBeLessThan(0.01);
+    expect(gainedAway).toBeLessThanOrEqual(gainedPresent);
+    expect((gainedPresent - gainedAway) / gainedPresent).toBeLessThan(0.02);
   });
 
   /**
@@ -139,14 +330,14 @@ describe('auto-buyers', () => {
    */
   it('is converged at the step size offline uses', () => {
     const run = (dt: number) => {
-      const s = armed();
+      const s = flowing();
+      s.cloud = { ...VAST };
       s.mass = D(1e4);
       s.totalMassEver = D('1e9');
+      s.rebasedStage = stageIndexFor(s.totalMassEver);
       for (let i = 0; i < Math.round(3600 / dt); i++) tick(s, dt);
       return s.totalMassEver.log10() - 9;
     };
-    // Halving the offline step must barely move the answer. If it does, the step has drifted
-    // coarse and offline is quietly paying less — a failure that looks like working software.
     const coarse = run(0.5);
     const fine = run(0.25);
     expect(Math.abs(fine - coarse) / fine).toBeLessThan(0.01);
@@ -156,11 +347,11 @@ describe('auto-buyers', () => {
 describe('achievements', () => {
   it('unlocks once and never twice', () => {
     const s = initialState(NOW);
-    s.stats.pulses = 1;
+    s.stats.purchases = 1;
 
-    expect(awardAchievements(s, 0.2)).toContain('firstPulse');
-    expect(awardAchievements(s, 0.2)).not.toContain('firstPulse');
-    expect(s.achievements.filter((id) => id === 'firstPulse')).toHaveLength(1);
+    expect(awardAchievements(s, deriveRates(s))).toContain('firstBuy');
+    expect(awardAchievements(s, deriveRates(s))).not.toContain('firstBuy');
+    expect(s.achievements.filter((id) => id === 'firstBuy')).toHaveLength(1);
   });
 
   it('multiplies everything, so earning them shows up in income', () => {
@@ -198,13 +389,20 @@ describe('achievements', () => {
       expect(achievement.how.length).toBeGreaterThan(0);
     }
   });
+
+  it('no longer rewards doing something on a timer', () => {
+    const ids = ACHIEVEMENTS.map((a) => a.id);
+    for (const gone of ['firstPulse', 'pulse50', 'pulse500', 'pulse5000']) {
+      expect(ids).not.toContain(gone);
+    }
+  });
 });
 
 describe('saving automation', () => {
-  it('round trips toggles and unlocked achievements', () => {
-    const s = armed();
+  it('round trips what is held and what has been earned', () => {
+    const s = flowing();
     s.autoBuy.radius = false;
-    s.achievements = ['firstPulse', 'shopping-that-does-not-exist', 'deepWell'];
+    s.achievements = ['firstBuy', 'shopping-that-does-not-exist', 'deepWell'];
     s.settings.autoBuyReserve = 0.35;
 
     const back = deserialize(JSON.parse(JSON.stringify(serialize(s))), NOW);
@@ -213,12 +411,12 @@ describe('saving automation', () => {
     expect(back.autoBuy.radius).toBe(false);
     expect(back.settings.autoBuyReserve).toBeCloseTo(0.35, 6);
     // An id this build does not know about must not survive and hand out a multiplier.
-    expect(back.achievements).toEqual(['firstPulse', 'deepWell']);
+    expect(back.achievements).toEqual(['firstBuy', 'deepWell']);
   });
 
   it('drops duplicate achievement ids rather than paying for them twice', () => {
     const s = initialState(NOW);
-    const blob = { ...serialize(s), achievements: ['firstPulse', 'firstPulse', 'deepWell'] };
-    expect(deserialize(blob, NOW).achievements).toEqual(['firstPulse', 'deepWell']);
+    const blob = { ...serialize(s), achievements: ['firstBuy', 'firstBuy', 'deepWell'] };
+    expect(deserialize(blob, NOW).achievements).toEqual(['firstBuy', 'deepWell']);
   });
 });

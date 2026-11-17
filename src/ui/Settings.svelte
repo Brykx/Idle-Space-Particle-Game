@@ -8,12 +8,14 @@
     onbudget: (n: number) => void;
     onreserve: (n: number) => void;
     onreducedmotion: (on: boolean) => void;
+    onsound: (on: boolean) => void;
+    onvolume: (v: number) => void;
     onexport: () => string;
     onimport: (text: string) => boolean;
     onreset: () => void;
   }
 
-  const { view, onnotation, onbudget, onreserve, onreducedmotion, onexport, onimport, onreset }: Props =
+  const { view, onnotation, onbudget, onreserve, onreducedmotion, onsound, onvolume, onexport, onimport, onreset }: Props =
     $props();
 
   let saveText = $state('');
@@ -44,6 +46,7 @@
       value={view.notation}
       onchange={(event) => onnotation(event.currentTarget.value as Notation)}
     >
+      <option value="words">1.23 million</option>
       <option value="letters">1.23 M</option>
       <option value="scientific">1.230e6</option>
       <option value="engineering">1.23e6</option>
@@ -70,7 +73,7 @@
 
   {#if view.autoBuyersUnlocked > 0}
     <div class="row">
-      <label for="reserve">Auto-buy reserve</label>
+      <label for="reserve">Held in reserve</label>
       <div class="slider">
         <input
           id="reserve"
@@ -85,7 +88,7 @@
       </div>
     </div>
 
-    <p class="note">Mass the auto-buyers will not touch, so you can save towards something by hand.</p>
+    <p class="note">Mass the currents will not touch, so you can save towards something by hand.</p>
   {/if}
 
   <div class="row">
@@ -97,6 +100,36 @@
       onchange={(event) => onreducedmotion(event.currentTarget.checked)}
     />
   </div>
+
+  <div class="row">
+    <label for="sound">Sound</label>
+    <input
+      id="sound"
+      type="checkbox"
+      checked={view.sound}
+      onchange={(event) => onsound(event.currentTarget.checked)}
+    />
+  </div>
+
+  {#if view.sound}
+    <div class="row">
+      <label for="volume">Volume</label>
+      <div class="slider">
+        <input
+          id="volume"
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          value={view.volume}
+          oninput={(event) => onvolume(Number(event.currentTarget.value))}
+        />
+        <span class="num">{Math.round(view.volume * 100)}%</span>
+      </div>
+    </div>
+  {/if}
+
+  <p class="note">A drone that follows the body, a few slow notes, a bell when something changes. Generated, never looped.</p>
 
   <hr />
 
@@ -131,12 +164,6 @@
     <button class="wide" onclick={() => (confirmingReset = true)}>Hard reset</button>
   {/if}
 
-  <dl class="stats">
-    <div><dt>Time played</dt><dd class="num">{view.playTime}</dd></div>
-    <div><dt>Upgrades bought</dt><dd class="num">{view.purchases}</dd></div>
-    <div><dt>Pulses fired</dt><dd class="num">{view.pulses}</dd></div>
-    <div><dt>Achievements</dt><dd class="num">{view.achievementsUnlocked}/{view.achievementCount}</dd></div>
-  </dl>
 </section>
 
 <style>
@@ -258,26 +285,5 @@
     padding: 0.4rem 0.5rem;
     font-family: var(--mono);
     font-size: 0.68rem;
-  }
-
-  .stats {
-    margin: 0.9rem 0 0;
-    display: grid;
-    gap: 0.25rem;
-    font-size: 0.75rem;
-  }
-
-  .stats div {
-    display: flex;
-    justify-content: space-between;
-  }
-
-  dt {
-    color: var(--dimmer);
-  }
-
-  dd {
-    margin: 0;
-    color: var(--dim);
   }
 </style>

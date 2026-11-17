@@ -11,15 +11,28 @@ async function seedSave(page: Page, fields: Record<string, unknown>): Promise<vo
   }, fields);
 }
 
-/** The readout is formatted ("3.60 K"), so tests cannot just call `Number()` on it. */
-const SUFFIXES: Record<string, number> = { K: 1e3, M: 1e6, B: 1e9, T: 1e12 };
+/** The readout is in words ("4.15 billion", "41,500"), so tests cannot just call `Number()` on it. */
+const WORDS: Record<string, number> = {
+  thousand: 1e3, million: 1e6, billion: 1e9, trillion: 1e12, quadrillion: 1e15, quintillion: 1e18,
+};
 
 async function readMass(page: Page): Promise<number> {
   const text = (await page.locator('.mass').innerText()).trim();
-  const match = /^(-?[\d.]+)\s*([A-Za-z]*)$/.exec(text);
+  const match = /^(-?[\d.,]+)\s*([a-z]*)$/.exec(text);
   if (!match) throw new Error(`Could not parse mass readout: "${text}"`);
-  const [, digits, suffix] = match;
-  return Number(digits) * (suffix ? (SUFFIXES[suffix] ?? Number.NaN) : 1);
+  const [, digits, word] = match;
+  return Number(digits!.replace(/,/g, '')) * (word ? (WORDS[word] ?? Number.NaN) : 1);
+}
+
+/**
+ * Summon the sheet, and turn to a page of it. Everything but the caption lives in the sheet,
+ * so most tests start here.
+ */
+async function openSheet(page: Page, tab?: 'System' | 'Energy' | 'Sky' | 'Journal' | 'Settings'): Promise<void> {
+  const summon = page.getByRole('button', { name: 'Open the sheet' });
+  if ((await summon.count()) > 0) await summon.click();
+  await expect(page.getByTestId('sheet')).toBeVisible();
+  if (tab) await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: tab }).click();
 }
 
 /**
@@ -133,47 +146,47 @@ test.describe('the game runs', () => {
     expect(await readMass(page)).toBeGreaterThan(first);
   });
 
-  test('pays out a gravity pulse, then holds a cooldown', async ({ page }) => {
-    const pulse = page.locator('.pulse');
-    await expect(pulse).toBeEnabled();
-
-    const before = await readMass(page);
-    await pulse.click();
-
-    await expect(pulse).toBeDisabled();
-    await expect(pulse).toContainText('Recharging');
-    expect(await readMass(page)).toBeGreaterThan(before);
+  test('has nothing on screen that pays you for pressing it on a timer', async ({ page }) => {
+    await expect(page.locator('.pulse')).toHaveCount(0);
+    await expect(page.getByText('Gravity Pulse')).toHaveCount(0);
+    await expect(page.getByText('Recharging')).toHaveCount(0);
   });
 
-  test('buys an upgrade and raises income', async ({ page }) => {
-    const buy = page.locator('.card .buy').first();
-    await expect(buy).toBeEnabled({ timeout: 45_000 });
+  test('offers the first current in the caption, and it flows once begun', async ({ page }) => {
+    // The one thing a first run asks: begin each current once. The caption offers it only
+    // when it can actually be done, so it is an invitation and never a nag.
+    const begin = page.getByTestId('begin');
+    await expect(begin).toBeVisible({ timeout: 45_000 });
+    await expect(begin).toContainText('Gravity Well');
+    await begin.click();
 
-    const rateBefore = await page.locator('.rate').innerText();
-    await buy.click();
-
-    await expect(page.locator('.card .level').first()).toHaveText('Lv 1');
-    await expect(page.locator('.rate')).not.toHaveText(rateBefore);
+    await openSheet(page, 'System');
+    const row = page.getByTestId('current-row').filter({ hasText: 'Gravity Well' });
+    await expect(row).toHaveAttribute('data-state', /flowing|settled/);
+    await expect(row.locator('.level')).not.toHaveText('Lv 0');
   });
 
   test('keeps progress across a reload', async ({ page }) => {
-    const buy = page.locator('.card .buy').first();
-    await expect(buy).toBeEnabled({ timeout: 45_000 });
-    await buy.click();
-    await expect(page.locator('.card .level').first()).toHaveText('Lv 1');
+    const begin = page.getByTestId('begin');
+    await expect(begin).toBeVisible({ timeout: 45_000 });
+    await begin.click();
+    await openSheet(page, 'System');
+    const level = page.getByTestId('current-row').first().locator('.level');
+    await expect(level).not.toHaveText('Lv 0');
 
     // The save is written on `pagehide`, which a reload fires — no need to wait out the
     // 10s autosave interval.
     await page.waitForTimeout(1500);
     await page.reload();
 
-    await expect(page.locator('.card .level').first()).toHaveText('Lv 1');
+    await openSheet(page, 'System');
+    await expect(page.getByTestId('current-row').first().locator('.level')).not.toHaveText('Lv 0');
     expect(await readMass(page)).toBeGreaterThan(0);
   });
 
   test('round trips a save through the export string', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-    await page.getByRole('button', { name: 'Settings' }).click();
+    await openSheet(page, 'Settings');
 
     await page.getByRole('button', { name: 'Export save' }).click();
     const saveString = await page.locator('textarea').inputValue();
@@ -220,19 +233,23 @@ test.describe('the game runs', () => {
     expect(await readMass(page)).toBeGreaterThan(massBefore + 3000);
   });
 
-  test('shows where you are on the ladder, and what a collapse is for', async ({ page }) => {
+  test('shows where you are on the ladder, and what lies past it', async ({ page }) => {
     await seedSave(page, { mass: '1e9', totalMassEver: '1e9' });
     await page.reload();
 
     await expect(page.locator('.stage-name')).toHaveText('Planet');
+    // The caption says what comes next in words; the sheet has the numbers.
+    await expect(page.getByTestId('caption').locator('.next')).toContainText('Gas Giant');
+
+    await openSheet(page, 'System');
     await expect(page.locator('.stage-analogue')).toContainText('Earth');
     await expect(page.locator('.goal')).toContainText('Gas Giant');
 
-    await page.getByRole('button', { name: 'Progress' }).click();
+    await openSheet(page, 'Journal');
     const rows = page.locator('.stages li');
-    await expect(rows).toHaveCount(14);
+    await expect(rows).toHaveCount(18);
 
-    // Everything up to Planet is behind you; the collapse stages never count as reached,
+    // Everything up to Planet is behind you; what a star leaves never counts as reached,
     // however heavy you get, because accretion cannot take you there.
     await expect(page.locator('.stages li.reached')).toHaveCount(7);
     await expect(page.locator('.stages li.current .name')).toHaveText('Planet');
@@ -247,69 +264,69 @@ test.describe('the game runs', () => {
 
     await expect(page.locator('.stage-name')).toHaveText('Dust');
 
-    const banner = page.locator('.announce');
+    // A line that fades in, not a box that arrives.
+    const banner = page.locator('.whisper');
     await expect(banner).toBeVisible({ timeout: 20_000 });
     await expect(banner.locator('.title')).toHaveText('Pebble');
     await expect(page.locator('.stage-name')).toHaveText('Pebble');
   });
 
-  test('unlocks auto-buy by investing, then spends on your behalf', async ({ page }) => {
-    // Gravity Well one level short of its auto-buy threshold, with mass to spend.
-    await seedSave(page, {
-      mass: '1e9',
-      totalMassEver: '1e9',
-      levels: { gravity: 24 },
-      achievements: [],
-    });
+  test('opens a current with one purchase, after which it flows by itself', async ({ page }) => {
+    // Nothing opened yet, with mass to spend.
+    await seedSave(page, { mass: '1e9', totalMassEver: '1e9', achievements: [] });
     await page.reload();
 
-    const card = page.locator('.card').first();
-    await expect(card.locator('.auto.locked')).toContainText('auto at Lv 25');
+    await openSheet(page, 'System');
+    const row = page.getByTestId('current-row').filter({ hasText: 'Gravity Well' });
+    await expect(row).toHaveAttribute('data-state', 'closed');
+    await expect(row.locator('.level')).toHaveText('Lv 0');
 
-    await card.locator('.buy').first().click();
-    await expect(card.locator('.level')).toHaveText('Lv 25');
+    await row.locator('.begin').click();
 
-    const toggle = card.locator('.auto input');
-    await expect(toggle).toBeVisible();
-    await expect(toggle).not.toBeChecked();
-
-    await toggle.check();
-    // Once it is on, the level climbs with no further clicks.
+    // Flowing is the default: no switch to find, the level simply climbs.
+    const toggle = row.locator('.flow input');
+    await expect(toggle).toBeChecked();
     await expect
-      .poll(async () => Number((await card.locator('.level').innerText()).replace('Lv ', '')), {
+      .poll(async () => Number((await row.locator('.level').innerText()).replace('Lv ', '')), {
         timeout: 15_000,
       })
-      .toBeGreaterThan(25);
+      .toBeGreaterThan(1);
+
+    // And it can be held, to be tended by hand.
+    await toggle.uncheck();
+    await expect(row).toHaveAttribute('data-state', 'held');
+    const held = Number((await row.locator('.level').innerText()).replace('Lv ', ''));
+    await page.waitForTimeout(1500);
+    expect(Number((await row.locator('.level').innerText()).replace('Lv ', ''))).toBe(held);
   });
 
   test('shows what a level is worth, and unlocks achievements', async ({ page }) => {
     await seedSave(page, { mass: '1e6', totalMassEver: '1e6', levels: { gravity: 10 } });
     await page.reload();
 
-    // Every card states the income a level would add, which is how a saturated upgrade shows.
-    await expect(page.locator('.card .gain').first()).toContainText('%');
+    // Every row states the income a level would add, which is how a saturated current shows.
+    await openSheet(page, 'System');
+    await expect(page.getByTestId('current-row').first().locator('.gain')).toContainText('%');
 
-    await page.getByRole('button', { name: 'Progress' }).click();
-    const unlockedBefore = await page.locator('.achievements li.unlocked').count();
+    await openSheet(page, 'Journal');
+    await expect(page.locator('.achievements li.unlocked').first()).toBeVisible();
 
-    await page.locator('.pulse').click();
-    await expect(page.locator('.achievements li.unlocked')).not.toHaveCount(unlockedBefore);
-
-    const banner = page.locator('.announce');
+    const banner = page.locator('.whisper');
     await expect(banner).toBeVisible();
-    await expect(banner.locator('.eyebrow')).toHaveText('Achievement');
+    await expect(banner.locator('.eyebrow')).toContainText('Achievement');
   });
 
   test('keeps the Energy tab hidden until there is a disk, then runs on energy', async ({ page }) => {
     await seedSave(page, { mass: '1e4', totalMassEver: '1e4' });
     await page.reload();
+    await openSheet(page);
     await expect(page.getByRole('button', { name: 'Energy' })).toHaveCount(0);
 
     // Heavy enough to have a disk, with energy banked to spend.
     await seedSave(page, { mass: '1e12', totalMassEver: '1e12', energy: '1e9' });
     await page.reload();
 
-    await page.getByRole('button', { name: 'Energy' }).click();
+    await openSheet(page, 'Energy');
     await expect(page.locator('.chain .name')).toHaveText('Hydrogen');
     await expect(page.locator('.chain li')).toHaveCount(6);
     // Iron is listed and permanently out of reach.
@@ -318,25 +335,152 @@ test.describe('the game runs', () => {
 
     // The disk is bought out of energy, and mass is untouched by it.
     const massBefore = await page.locator('.mass').innerText();
-    const card = page.locator('.upgrades .card').first();
+    const card = page.getByTestId('current-row').first();
     await expect(card.locator('h3')).toHaveText('Accretion Disk');
     await expect(card.locator('.gain')).toContainText('throughput');
 
-    await card.locator('.buy').first().click();
-    await expect(card.locator('.level')).toHaveText('Lv 1');
+    await card.locator('.begin').click();
+    // Opened, so it carries on: with energy banked it is several levels up before we look.
+    await expect(card.locator('.level')).not.toHaveText('Lv 0');
     expect(await page.locator('.mass').innerText()).not.toBe('');
     void massBefore;
   });
-  // Every body kind the ladder can reach by mass. The last two stages, the neutron star and
-  // the black hole, carry no threshold — they arrive with the supernova in Phase 3 — so they
-  // are covered by `bodies.html` instead, which mounts the field on its own.
+  test('shows what the ladder pays, and warns which card it will empty', async ({ page }) => {
+    // The promotion multiplier is real whether or not it is visible, and an invisible one is
+    // the exact problem it was built to fix. So both halves are asserted: what climbing pays,
+    // and that the card it takes from says so before it happens.
+    await seedSave(page, {
+      mass: '4e9',
+      totalMassEver: '4e9',
+      levels: { density: 6 },
+      levelsEver: { density: 90 },
+      rebasedStage: 6,
+      stageSeen: 6,
+    });
+    await page.reload();
+    await expect(page.locator('.stage-name')).toHaveText('Planet');
+
+    // What the next promotion is worth, stated before you make it.
+    await openSheet(page, 'System');
+    await expect(page.locator('.goal .pays')).toHaveText(/x[\d.]+/);
+
+    // The current that resets says so.
+    const density = page.getByTestId('current-row').filter({ hasText: 'Particle Density' });
+    await expect(density.locator('.rebased')).toHaveText('resets');
+
+    // And the breakdown attributes the ladder's share to the ladder, rather than hiding it
+    // inside a line labelled "efficiency".
+    const ladder = page.locator('.breakdown li.ladder');
+    await expect(ladder.locator('.label')).toHaveText('the ladder');
+    await expect(ladder.locator('.value')).toHaveText(/x[\d.]+/);
+  });
+
+  test('lets a star go, offers the next cloud, and survives a reload', async ({ page }) => {
+    // The one flow in the game that deletes almost everything on purpose. If it is wrong it
+    // is wrong in the worst possible way, so it is driven end to end rather than unit-tested
+    // and hoped for: arm, confirm, choose, and then a fresh page to prove it was written down.
+    //
+    // The release is drawn by code that runs at no other time, so anything it throws is
+    // collected and asserted on at the end rather than lost in the console.
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(String(error)));
+
+    // Heavier than the first cloud holds, which the save migration turns into a finished Sun.
+    await seedSave(page, {
+      mass: '9e21',
+      totalMassEver: '9e21',
+      levels: { gravity: 80, radius: 60, density: 8, particleMass: 50, efficiency: 18 },
+      levelsEver: { gravity: 80, radius: 60, density: 160, particleMass: 50, efficiency: 18 },
+      rebasedStage: 11,
+      stageSeen: 11,
+    });
+    await page.reload();
+    await expect(page.locator('.stage-name')).toHaveText('Yellow Dwarf');
+
+    await openSheet(page, 'Sky');
+    const current = page.getByTestId('current');
+    await expect(current).toContainText('The star is finished');
+    await expect(current).toContainText('stardust');
+
+    // Two steps, and the second only appears after the first has said what it costs.
+    await expect(page.getByTestId('release')).toHaveCount(0);
+    await page.getByTestId('arm-release').click();
+    await expect(current.locator('.cost')).toContainText('This run ends');
+    await page.getByTestId('release').click();
+
+    // Between stars: the field is empty and the next cloud is a choice.
+    await expect(page.locator('.stage-name')).toHaveText('Between stars');
+    await expect(page.getByTestId('caption-choose')).toBeVisible();
+    await expect(page.getByTestId('choose')).toBeVisible();
+    await expect(page.getByTestId('offer')).toHaveCount(3);
+    await expect(page.locator('.readouts .value').nth(0)).toHaveText('91');
+    await expect(page.locator('.readouts .value').nth(1)).toHaveText('1');
+    await expect(page.getByTestId('catalogue')).toContainText('Morning');
+
+    // Spend some of it, and begin the next star.
+    const enrichment = page.getByTestId('tree-card').filter({ hasText: 'Enrichment' });
+    await enrichment.locator('.buy').click();
+    await expect(enrichment.locator('.level')).toHaveText('1 / 8');
+
+    const chosen = (await page.getByTestId('offer').first().locator('.cloud-name').innerText()).trim();
+    await page.getByTestId('offer').first().click();
+    await expect(page.getByTestId('choose')).toHaveCount(0);
+    await expect(page.getByTestId('current')).toContainText(chosen);
+    await expect(page.locator('.stage-name')).toHaveText('Dust');
+
+    // A new page rather than a reload. `seedSave` installs an init script, and an init script
+    // runs on every navigation — reloading here would helpfully write the old save back over
+    // the top and the test would be checking the fixture, not the game.
+    const returning = await page.context().newPage();
+    await returning.goto('/');
+    await openSheet(returning, 'Sky');
+    await expect(returning.locator('.readouts .value').nth(1)).toHaveText('1');
+    await expect(returning.getByTestId('tree-card').filter({ hasText: 'Enrichment' }).locator('.level')).toHaveText('1 / 8');
+    await expect(returning.getByTestId('current')).toContainText(chosen);
+    await expect(returning.getByTestId('catalogue')).toContainText('Morning');
+    await returning.close();
+
+    expect(errors, 'nothing thrown while the star was let go').toEqual([]);
+  });
+
+  test('is an empty field between stars', async ({ page }) => {
+    // The same heavy core twice, once with a cloud and once without. Comparing the two
+    // isolates the one property under test — no cloud, no body — from everything else that
+    // lights the middle of the screen, which is not nothing: the page's own gradient and the
+    // band of the sky both run brighter there than in a corner.
+    const centreWith = async (cloud: unknown) => {
+      await seedSave(page, {
+        version: 5,
+        mass: '1e9',
+        totalMassEver: '1e9',
+        cloud,
+        settings: { particleBudget: 0, reducedMotion: true },
+      });
+      await page.reload();
+      await page.waitForTimeout(2500);
+      const box = (await page.locator('canvas').boundingBox()) as Box;
+      return luminance(page, { x: box.x + box.width / 2 - 30, y: box.y + box.height / 2 - 30, width: 60, height: 60 });
+    };
+
+    const planet = await centreWith({ seed: 1, name: 'Morning Veil', ceiling: 'yellowDwarf', pace: 1, trait: 'quiet', hue: 214 });
+    await expect(page.locator('.stage-name')).toHaveText('Planet');
+
+    const between = await centreWith(null);
+    await expect(page.locator('.stage-name')).toHaveText('Between stars');
+
+    expect(planet.mean).toBeGreaterThan(between.mean + 10);
+  });
+
+  // Every body kind the ladder can reach by mass. The last two, the neutron star and the
+  // black hole, carry no threshold — they are what a star leaves, not what it grows into — so
+  // they are covered by `bodies.html` instead, which mounts the field on its own.
   const BODIES: Array<[string, string, string]> = [
     ['mote', '50', 'Dust'],
     ['rock', '5e3', 'Boulder'],
     ['world', '1e9', 'Planet'],
     ['gas', '1e11', 'Gas Giant'],
     ['ember', '1e13', 'Brown Dwarf'],
-    ['star', '1e18', 'Star'],
+    ['star', '1e18', 'Orange Dwarf'],
   ];
 
   for (const [kind, mass, label] of BODIES) {
@@ -390,3 +534,87 @@ test.describe('the game runs', () => {
     });
   }
 });
+
+test.describe('the interface recedes', () => {
+  test('dims when you stop moving, and comes back when you move', async ({ page }) => {
+    await page.goto('/');
+    const app = page.locator('main.app');
+    await expect(app).not.toHaveClass(/idle/);
+
+    // Nine seconds of stillness, by design; there is no shorter honest way to wait for it.
+    await expect(app).toHaveClass(/idle/, { timeout: 12_000 });
+    await page.mouse.move(200, 200);
+    await page.mouse.move(240, 260);
+    await expect(app).not.toHaveClass(/idle/);
+  });
+});
+
+test.describe('on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('keeps the caption on screen and brings the sheet up from the bottom', async ({ page }) => {
+    await page.goto('/');
+
+    const caption = page.getByTestId('caption');
+    await expect(caption).toBeVisible();
+    const captionBox = (await caption.boundingBox()) as Box;
+    expect(captionBox.x).toBeGreaterThanOrEqual(0);
+    expect(captionBox.x + captionBox.width).toBeLessThanOrEqual(390);
+
+    // Nothing wider than the screen: a phone layout that scrolls sideways is not one.
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBe(0);
+
+    await page.getByRole('button', { name: 'Open the sheet' }).click();
+    const sheet = page.getByTestId('sheet');
+    await expect(sheet).toBeVisible();
+    await page.waitForTimeout(800);
+    const sheetBox = (await sheet.boundingBox()) as Box;
+    expect(sheetBox.width).toBeCloseTo(390, 0);
+    expect(sheetBox.y + sheetBox.height).toBeCloseTo(844, 0);
+    expect(sheetBox.y, 'from the bottom, leaving the top of the field in view').toBeGreaterThan(150);
+
+    await page.keyboard.press('Escape');
+    await expect(sheet).toBeHidden();
+  });
+});
+
+test.describe('sound, if you want it', () => {
+  test('is off until asked for, and remembered once it is', async ({ page }) => {
+    await page.goto('/');
+    await openSheet(page, 'Settings');
+    const toggle = page.locator('#sound');
+    await expect(toggle).not.toBeChecked();
+    await expect(page.locator('#volume')).toHaveCount(0);
+
+    await toggle.check();
+    await expect(page.locator('#volume')).toBeVisible();
+
+    await page.waitForTimeout(1200);
+    await page.reload();
+    await openSheet(page, 'Settings');
+    await expect(page.locator('#sound')).toBeChecked();
+  });
+
+  /**
+   * The only honest check of a synthesiser is to listen to it. The closest a test can come is
+   * to render the drone, a note and a bell offline and look at the samples: there should be
+   * sound, it should not clip, and none of it should be NaN — which is what a bad parameter
+   * ramp produces, silently, in every browser.
+   */
+  test('renders a drone, a note and a bell that are audible, unclipped and finite', async ({ page }) => {
+    await page.goto('/?audiotest');
+    await page.waitForFunction(() => '__renderAmbience' in window);
+    const result = await page.evaluate(async () => {
+      const render = (window as unknown as { __renderAmbience: (s: number) => Promise<{ peak: number; rms: number; nan: boolean }> }).__renderAmbience;
+      return render(4);
+    });
+    expect(result.nan).toBe(false);
+    expect(result.peak).toBeGreaterThan(0.01);
+    expect(result.peak).toBeLessThan(0.99);
+    expect(result.rms).toBeGreaterThan(0.002);
+  });
+});
+

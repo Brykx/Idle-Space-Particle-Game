@@ -1,5 +1,8 @@
+import { D } from './numbers';
 import type { GameState } from './state';
 import { UPGRADE_IDS } from './upgrades';
+import { STARDUST_LIST } from './sky';
+import { SPECTRAL_CLASSES, stageIndexById, stageAt } from './stages';
 
 /**
  * Achievements: the cheapest retention mechanic there is, and the only one that rewards
@@ -21,8 +24,12 @@ export interface AchievementContext {
   state: GameState;
   captureFraction: number;
   stageIndex: number;
-  autoBuyersOn: number;
-  autoBuyersAvailable: number;
+  /** Currents that are open and not being held back. */
+  flowing: number;
+  /** Currents begun at least once, ever. */
+  open: number;
+  /** Where the element chain has got to. 0 is plain hydrogen. */
+  elementTier: number;
 }
 
 export interface Achievement {
@@ -36,25 +43,38 @@ export interface Achievement {
 const levelAtLeast = (id: (typeof UPGRADE_IDS)[number], level: number) => (c: AchievementContext) =>
   c.state.levels[id] >= level;
 
+/**
+ * Levels *ever*, for the upgrades that reset at a promotion.
+ *
+ * Particle Density goes back to zero eleven times a run, so an achievement reading its
+ * current level would be asking for something the ladder takes away again.
+ */
+const investedAtLeast = (id: (typeof UPGRADE_IDS)[number], level: number) => (c: AchievementContext) =>
+  c.state.levelsEver[id] >= level;
+
+/**
+ * By id, not by position. The ladder has been re-cut twice, and an achievement that says
+ * "index 10" quietly changes meaning every time it is.
+ */
+const stageAtLeast = (id: string) => {
+  const index = stageIndexById(id);
+  return (c: AchievementContext) => c.stageIndex >= index;
+};
+
+/** Stars in your sky of the given fate. */
+const skyHas = (test: (stage: string) => boolean) => (c: AchievementContext) =>
+  c.state.sky.some((star) => test(star.stage));
+
+const fateOf = (stage: string) => {
+  try {
+    return stageAt(stageIndexById(stage)).fate;
+  } catch {
+    return undefined;
+  }
+};
+const massAtLeast = (amount: string) => (c: AchievementContext) => c.state.totalMassEver.gte(D(amount));
+
 export const ACHIEVEMENTS: Achievement[] = [
-  {
-    id: 'firstPulse',
-    name: 'Nudge',
-    how: 'Fire a Gravity Pulse',
-    test: (c) => c.state.stats.pulses >= 1,
-  },
-  {
-    id: 'pulse50',
-    name: 'Percussive Maintenance',
-    how: 'Fire 50 Gravity Pulses',
-    test: (c) => c.state.stats.pulses >= 50,
-  },
-  {
-    id: 'pulse500',
-    name: 'Compulsive',
-    how: 'Fire 500 Gravity Pulses',
-    test: (c) => c.state.stats.pulses >= 500,
-  },
   {
     id: 'firstBuy',
     name: 'Shopping',
@@ -125,31 +145,31 @@ export const ACHIEVEMENTS: Achievement[] = [
     id: 'roundedOff',
     name: 'Rounded Off',
     how: 'Reach the Protoplanet stage',
-    test: (c) => c.stageIndex >= 5,
+    test: stageAtLeast('protoplanet'),
   },
   {
     id: 'home',
     name: 'Home',
     how: 'Reach the Planet stage',
-    test: (c) => c.stageIndex >= 6,
+    test: stageAtLeast('planet'),
   },
   {
     id: 'firstLight',
     name: 'First Light',
     how: 'Reach the Red Dwarf stage and start burning hydrogen',
-    test: (c) => c.stageIndex >= 9,
+    test: stageAtLeast('redDwarf'),
   },
   {
     id: 'delegation',
-    name: 'Delegation',
-    how: 'Switch on an auto-buyer',
-    test: (c) => c.autoBuyersOn >= 1,
+    name: 'Let It Run',
+    how: 'Open a current and leave it to flow',
+    test: (c) => c.flowing >= 1,
   },
   {
     id: 'handsOff',
     name: 'Hands Off',
-    how: 'Switch on every auto-buyer you have unlocked (all five)',
-    test: (c) => c.autoBuyersAvailable >= UPGRADE_IDS.length && c.autoBuyersOn >= UPGRADE_IDS.length,
+    how: 'Have every current there is open and flowing at once',
+    test: (c) => c.open >= UPGRADE_IDS.length && c.flowing >= UPGRADE_IDS.length,
   },
   {
     id: 'absentLandlord',
@@ -160,8 +180,8 @@ export const ACHIEVEMENTS: Achievement[] = [
   {
     id: 'longWeekend',
     name: 'Long Weekend',
-    how: 'Stay away long enough to cap offline accretion',
-    test: (c) => c.state.stats.longestAway >= 12 * 3600,
+    how: 'Come back after two days away',
+    test: (c) => c.state.stats.longestAway >= 48 * 3600,
   },
   {
     id: 'stillHere',
@@ -174,6 +194,289 @@ export const ACHIEVEMENTS: Achievement[] = [
     name: 'Insurance',
     how: 'Export a save',
     test: (c) => c.state.stats.exports >= 1,
+  },
+
+  // --- the ladder ---------------------------------------------------------------------
+  //
+  // The ladder is already its own reward, so these are landmarks rather than a second
+  // progress bar: the four that change what the game is, plus the two ends of it.
+  {
+    id: 'firstPromotion',
+    name: 'Something From Nothing',
+    how: 'Be promoted for the first time',
+    test: stageAtLeast('pebble'),
+  },
+  {
+    id: 'boulder',
+    name: 'Holding Together',
+    how: 'Reach the Boulder stage',
+    test: stageAtLeast('boulder'),
+  },
+  {
+    id: 'ownGravity',
+    name: 'Your Own Gravity',
+    how: 'Reach the Planetesimal stage, where you hold yourself together',
+    test: stageAtLeast('planetesimal'),
+  },
+  {
+    id: 'asteroid',
+    name: 'Named Rock',
+    how: 'Reach the Asteroid stage',
+    test: stageAtLeast('asteroid'),
+  },
+  {
+    id: 'gasGiant',
+    name: 'Too Big To Be Rock',
+    how: 'Reach the Gas Giant stage',
+    test: stageAtLeast('gasGiant'),
+  },
+  {
+    id: 'brownDwarf',
+    name: 'Nearly',
+    how: 'Reach the Brown Dwarf stage — heavy enough to burn deuterium, not hydrogen',
+    test: stageAtLeast('brownDwarf'),
+  },
+  {
+    id: 'sunlike',
+    name: 'Sunlike',
+    how: 'Become a yellow dwarf, like the Sun',
+    test: stageAtLeast('yellowDwarf'),
+  },
+  {
+    id: 'pastEight',
+    name: 'No Quiet Ending',
+    how: 'Grow past eight solar masses, into a blue giant',
+    test: stageAtLeast('blueGiant'),
+  },
+  {
+    id: 'supergiant',
+    name: 'Living Fast',
+    how: 'Grow a blue supergiant, the largest star a cloud can make',
+    test: stageAtLeast('blueSupergiant'),
+  },
+
+  // --- sheer mass ---------------------------------------------------------------------
+  { id: 'mass1e6', name: 'Six Figures', how: 'Accumulate 1e6 mass', test: massAtLeast('1e6') },
+  { id: 'mass1e12', name: 'Twelve', how: 'Accumulate 1e12 mass', test: massAtLeast('1e12') },
+  { id: 'mass1e18', name: 'Eighteen', how: 'Accumulate 1e18 mass', test: massAtLeast('1e18') },
+  { id: 'mass1e24', name: 'Past Counting', how: 'Accumulate 1e24 mass', test: massAtLeast('1e24') },
+  { id: 'mass1e30', name: 'Thirty', how: 'Accumulate 1e30 mass', test: massAtLeast('1e30') },
+  { id: 'mass1e36', name: 'More Than Most', how: 'Accumulate 1e36 mass', test: massAtLeast('1e36') },
+
+  // --- the chain ----------------------------------------------------------------------
+  {
+    id: 'helium',
+    name: 'Ash',
+    how: 'Fuse hydrogen into helium',
+    test: (c) => c.elementTier >= 1,
+  },
+  {
+    id: 'carbon',
+    name: 'Organic Chemistry, Eventually',
+    how: 'Reach carbon',
+    test: (c) => c.elementTier >= 2,
+  },
+  {
+    id: 'oxygen',
+    name: 'Breathable, In Principle',
+    how: 'Reach oxygen',
+    test: (c) => c.elementTier >= 3,
+  },
+  {
+    id: 'silicon',
+    name: 'The Last Rung',
+    how: 'Reach silicon, the end of what any throughput can hold',
+    test: (c) => c.elementTier >= 4,
+  },
+
+  // --- the disk -----------------------------------------------------------------------
+  {
+    id: 'firstEnergy',
+    name: 'Something Shining',
+    how: 'Shed your first energy from the disk',
+    test: (c) => c.state.totalEnergyEver.gt(0),
+  },
+  {
+    id: 'disk10',
+    name: 'Spun Up',
+    how: 'Accretion Disk to level 10',
+    test: levelAtLeast('disk', 10),
+  },
+  {
+    id: 'confinement10',
+    name: 'Held Together',
+    how: 'Magnetic Confinement to level 10',
+    test: levelAtLeast('confinement', 10),
+  },
+  {
+    id: 'magnetic10',
+    name: 'Along The Field',
+    how: 'Field Lines to level 10',
+    test: levelAtLeast('magnetic', 10),
+  },
+
+  // --- depth --------------------------------------------------------------------------
+  {
+    id: 'gravity100',
+    name: 'Deep',
+    how: 'Gravity Well to level 100',
+    test: levelAtLeast('gravity', 100),
+  },
+  {
+    id: 'radius100',
+    name: 'Wide',
+    how: 'Capture Radius to level 100',
+    test: levelAtLeast('radius', 100),
+  },
+  {
+    id: 'density50',
+    name: 'Thicker Still',
+    how: 'Particle Density to level 50 within a single stage',
+    test: levelAtLeast('density', 50),
+  },
+  {
+    id: 'density300',
+    name: 'Again And Again',
+    how: 'Buy 300 levels of Particle Density in total, across as many stages as it takes',
+    test: investedAtLeast('density', 300),
+  },
+  {
+    id: 'particleMass100',
+    name: 'Heavy Going',
+    how: 'Particle Mass to level 100',
+    test: levelAtLeast('particleMass', 100),
+  },
+  {
+    id: 'efficiency25',
+    name: 'Nothing Wasted',
+    how: 'Accretion Efficiency to level 25',
+    test: levelAtLeast('efficiency', 25),
+  },
+
+  // --- how you play -------------------------------------------------------------------
+  {
+    id: 'someHelp',
+    name: 'Some Help',
+    how: 'Have three currents flowing at once',
+    test: (c) => c.flowing >= 3,
+  },
+  {
+    id: 'reserved',
+    name: 'Saving Up',
+    how: 'Hold back half your mass from the currents',
+    test: (c) => c.state.settings.autoBuyReserve >= 0.5,
+  },
+  {
+    id: 'sixHours',
+    name: 'An Afternoon',
+    how: 'Play for six hours',
+    test: (c) => c.state.playTime >= 6 * 3600,
+  },
+  {
+    id: 'aDay',
+    name: 'A Day',
+    how: 'Play for twenty-four hours',
+    test: (c) => c.state.playTime >= 24 * 3600,
+  },
+
+  // --- the sky -------------------------------------------------------------------------
+  //
+  // Ids kept from when a run ended in a collapse, so a player who earned them keeps them.
+  // They meant "you finished a run", and they still do.
+  {
+    id: 'firstCollapse',
+    name: 'A Light Of Your Own',
+    how: 'Let a star go into your sky',
+    test: (c) => c.state.sky.length >= 1,
+  },
+  {
+    id: 'collapse3',
+    name: 'Second Generation',
+    how: 'Have three stars in your sky',
+    test: (c) => c.state.sky.length >= 3,
+  },
+  {
+    id: 'collapse10',
+    name: 'Population I',
+    how: 'Have ten stars in your sky',
+    test: (c) => c.state.sky.length >= 10,
+  },
+  {
+    id: 'sky25',
+    name: 'Enough To Draw',
+    how: 'Have twenty-five stars in your sky',
+    test: (c) => c.state.sky.length >= 25,
+  },
+  {
+    id: 'sky50',
+    name: 'Your Own Night',
+    how: 'Have fifty stars in your sky',
+    test: (c) => c.state.sky.length >= 50,
+  },
+  {
+    id: 'emberKept',
+    name: 'It Will Outlive Everything',
+    how: 'Keep a red dwarf. Not one has ever died',
+    test: skyHas((stage) => fateOf(stage) === 'ember'),
+  },
+  {
+    id: 'nebulaShed',
+    name: 'A Shell Of Its Own Gas',
+    how: 'Let a star go gently, as a planetary nebula',
+    test: skyHas((stage) => fateOf(stage) === 'nebula'),
+  },
+  {
+    id: 'supernova',
+    name: 'We Are Made Of This',
+    how: 'Let a star go as a supernova',
+    test: skyHas((stage) => fateOf(stage) === 'supernova'),
+  },
+  {
+    id: 'everyClass',
+    name: 'Seven Colours',
+    how: 'Have a star of every class, M to O, in your sky',
+    test: (c) => {
+      const classes = new Set(
+        c.state.sky.map((star) => {
+          try {
+            return stageAt(stageIndexById(star.stage)).spectral;
+          } catch {
+            return undefined;
+          }
+        }),
+      );
+      return SPECTRAL_CLASSES.every((letter) => classes.has(letter));
+    },
+  },
+  {
+    id: 'stoppedShort',
+    name: 'Enough',
+    how: 'Let a star go before its cloud is spent',
+    test: (c) => c.state.sky.some((star) => !star.completed),
+  },
+  {
+    id: 'stardust100',
+    name: 'A Pinch',
+    how: 'Earn 100 stardust in total',
+    test: (c) => c.state.stardustEver >= 100,
+  },
+  {
+    id: 'stardust1e5',
+    name: 'A Handful Of Nebula',
+    how: 'Earn 1,000 stardust in total',
+    test: (c) => c.state.stardustEver >= 1000,
+  },
+  {
+    id: 'oneMaxed',
+    name: 'Finished With That One',
+    how: 'Take a card of the tree as far as it goes',
+    test: (c) => STARDUST_LIST.some((def) => c.state.stardustLevels[def.id] >= def.maxLevel),
+  },
+  {
+    id: 'allMaxed',
+    name: 'Everything It Had',
+    how: 'Take every card of the tree as far as it goes',
+    test: (c) => STARDUST_LIST.every((def) => c.state.stardustLevels[def.id] >= def.maxLevel),
   },
 ];
 

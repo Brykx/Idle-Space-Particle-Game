@@ -32,12 +32,6 @@
       <p class="promoted">You are now a <strong>{view.awayStage}</strong>.</p>
     {/if}
 
-    {#if view.away.capped}
-      <p class="capped">
-        Offline accretion is credited for up to 12 hours. The rest of the cloud drifted past.
-      </p>
-    {/if}
-
     <button autofocus onclick={() => element?.close()}>Continue</button>
   {/if}
 </dialog>
@@ -96,12 +90,6 @@
     color: var(--warm);
   }
 
-  .capped {
-    margin: 1rem 0 0;
-    font-size: 0.75rem;
-    line-height: 1.45;
-    color: var(--dim);
-  }
 
   button {
     margin-top: 1.3rem;

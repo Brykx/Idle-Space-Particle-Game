@@ -11,11 +11,16 @@ import { D, type Num } from './numbers';
  * a star by putting on more rock, but a gas giant can ladder up through brown dwarf to red
  * dwarf, and those thresholds are real.
  *
- * The ladder breaks exactly once, between star and neutron star, and it breaks in a useful
- * direction: a star does not become a neutron star by gaining mass, it runs out of fuel and
- * blows roughly ninety percent of itself away. Mass goes *down* by more than an order of
- * magnitude. That is a prestige reset, which is why the last two stages here carry no
- * threshold — they arrive with the supernova in Phase 3, not by accretion.
+ * From the first star onwards the ladder is the spectral sequence: M, K, G, F, A, B, O. It
+ * used to be three rungs called Red Dwarf, Star and Supergiant, which were three points
+ * picked off this sequence and given invented names. The real one has seven classes, each
+ * with a colour that is simply its temperature, and a fate decided by its mass — which is
+ * what makes a star you made worth keeping, and one class of them different from another.
+ *
+ * What a star *becomes* is not on the ladder. A star does not turn into a neutron star by
+ * gaining mass; it runs out of fuel and throws most of itself away. The last two entries
+ * carry no threshold for that reason. They are bodies the renderer knows how to draw, for
+ * the moment a star is let go and for the black hole still to come.
  */
 
 /**
@@ -26,6 +31,23 @@ import { D, type Num } from './numbers';
  * be dark anywhere, so a boulder could never look like a boulder.
  */
 export type BodyKind = 'mote' | 'rock' | 'world' | 'gas' | 'ember' | 'star' | 'remnant' | 'hole';
+
+/** What a single infalling particle is: a speck of dust, a grain, or a lit body. */
+export type GrainKind = 'mote' | 'grit' | 'rock';
+
+/** The seven classes of the main sequence, coolest and lightest first. */
+export const SPECTRAL_CLASSES = ['M', 'K', 'G', 'F', 'A', 'B', 'O'] as const;
+export type SpectralClass = (typeof SPECTRAL_CLASSES)[number];
+
+/**
+ * How a star ends.
+ *
+ * - `ember`: a red dwarf burns so slowly that none has ever died. It simply stays.
+ * - `nebula`: under about eight solar masses a star puffs its envelope off as a shell of gas
+ *   and leaves a white dwarf in the middle of it.
+ * - `supernova`: over it, the core collapses and the rest is thrown out in one event.
+ */
+export type Fate = 'ember' | 'nebula' | 'supernova';
 
 export interface StageLook {
   /** Which family of body this stage is, and therefore how it is rendered. */
@@ -41,13 +63,19 @@ export interface StageLook {
    * Sprite size multiplier, and a multiplier on how many are emitted.
    *
    * These two are one rule, not two settings: as the core climbs, particles get **bigger and
-   * fewer**. Dust is a haze of specks that barely fall; Planet is sparse traffic of
-   * individually visible meteors; Supergiant swallows moons a couple at a time.
+   * fewer**. Dust is a haze of specks that barely fall; Supergiant is sparse traffic of
+   * individually visible bodies falling into something enormous.
    *
-   * Count falls close to the inverse square of size, so the total lit *area* rises only about
-   * twofold across the whole ladder. That constraint is load-bearing, because the field blends
-   * additively: let the area climb freely and the late game is a white blowout, hold it exactly
-   * flat and the late game feels no weightier than the early.
+   * The first pass at this took the idea much further — 14x the size and a seventieth of the
+   * count — and it was wrong in a way that only showed once the particles became lit rocks
+   * rather than white dots. A solar system does not read as a star surrounded by moons. It
+   * reads as a *large* central body and *small* traffic, and the moment the sprites had
+   * silhouettes, boulders the size of the star stopped looking like scale and started looking
+   * like a mistake. Size now grows about fivefold across the ladder, not fourteen.
+   *
+   * Count falls close to the inverse square of size, so the total lit *area* stays roughly
+   * flat. That constraint is load-bearing at the early stages, where the field blends
+   * additively: let the area climb freely and the mid game is a white blowout.
    *
    * At the dust end the count is larger than the pool can hold, which is the intended result —
    * dust saturates the particle budget, and the budget slider is what decides how thick it
@@ -67,6 +95,41 @@ export interface StageLook {
 
   /** Seconds before an unabsorbed particle gives up. Long enough early to allow real orbits. */
   lifetime: number;
+
+  /**
+   * How far out the field reaches, as a fraction of the screen's own reach.
+   *
+   * The last piece of field identity, and it says the same thing the other four do from a
+   * different direction. Dust is a cloud you are sitting inside: it fills the frame and comes
+   * from everywhere. A supergiant's traffic is close-in and fast — a handful of bodies on
+   * tight orbits, with the far field empty because anything out there was swept up long ago.
+   *
+   * Narrowing it also buys back what bigger particles cost. Late-stage bodies are drawn many
+   * times the size of a dust mote, so spreading the same few of them over the whole screen is
+   * what makes the top of the ladder look emptier than the bottom despite weighing more.
+   */
+  width: number;
+
+  /**
+   * What the infalling matter is made of, and therefore how a single particle is drawn.
+   *
+   * The same argument as `BodyKind`, one level down. A cloud of dust and a stream of
+   * meteoroids are not the same thing scaled, and drawing both as a soft white dot made the
+   * late ladder read as fog blowing past a star rather than as a system sweeping up what is
+   * left of its own disc.
+   */
+  grain: GrainKind;
+
+  /**
+   * How far the field is tilted out of face-on, 0 to 1.
+   *
+   * A cloud has no plane; a system does. Dust stays face-on and isotropic — it is a cloud you
+   * are sitting inside, and that is the one stage of the field nobody wanted changed. From
+   * the first solid body onwards the field flattens towards a disc seen from above its plane,
+   * which is both what accretion actually does and the single strongest signal that what you
+   * are looking at is a solar system rather than a snowstorm.
+   */
+  tilt: number;
 }
 
 export interface Stage {
@@ -81,6 +144,13 @@ export interface Stage {
   blurb: string;
   /** What this would weigh in the real world. */
   analogue: string;
+  /**
+   * Spectral class, for the stages that are stars. Its presence is what makes a stage one
+   * you can let go of and keep.
+   */
+  spectral?: SpectralClass;
+  /** What a star of this class leaves behind. Decided by mass, as it is in the sky. */
+  fate?: Fate;
   look: StageLook;
 }
 
@@ -93,10 +163,13 @@ export const STAGES: Stage[] = [
     analogue: 'a grain of interstellar dust',
     look: { body: 'mote', core: 0x8892a6, particle: 0x9fc6ff, scale: 0.02,
       particleSize: 0.3,
-      particleCount: 8.0,
+      particleCount: 9.0,
       orbit: [0.6, 0.9],
       drag: 0.06,
       lifetime: 26,
+      width: 1.0,
+      grain: 'mote',
+      tilt: 0,
     },
   },
   {
@@ -106,11 +179,14 @@ export const STAGES: Stage[] = [
     blurb: 'Enough grains to be a thing. Gravity is still a rumour.',
     analogue: 'a handful of gravel',
     look: { body: 'rock', core: 0x9a8f80, particle: 0xb8c8e8, scale: 0.05,
-      particleSize: 0.4,
-      particleCount: 5.5,
+      particleSize: 0.36,
+      particleCount: 7.0,
       orbit: [0.55, 0.85],
       drag: 0.09,
       lifetime: 23,
+      width: 0.97,
+      grain: 'mote',
+      tilt: 0.08,
     },
   },
   {
@@ -120,11 +196,14 @@ export const STAGES: Stage[] = [
     blurb: 'Loose rock, held together by contact rather than by you.',
     analogue: 'a boulder',
     look: { body: 'rock', core: 0xa08b74, particle: 0xc2cfe6, scale: 0.09,
-      particleSize: 0.55,
-      particleCount: 3.4,
+      particleSize: 0.45,
+      particleCount: 5.2,
       orbit: [0.5, 0.8],
       drag: 0.12,
       lifetime: 20,
+      width: 0.93,
+      grain: 'grit',
+      tilt: 0.2,
     },
   },
   {
@@ -134,11 +213,14 @@ export const STAGES: Stage[] = [
     blurb: 'A kilometre across. For the first time, what holds you together is your own gravity.',
     analogue: 'a 1 km planetesimal',
     look: { body: 'rock', core: 0xb09070, particle: 0xcdd8ea, scale: 0.14,
-      particleSize: 0.7,
-      particleCount: 2.3,
+      particleSize: 0.55,
+      particleCount: 4.0,
       orbit: [0.45, 0.74],
       drag: 0.15,
       lifetime: 18,
+      width: 0.88,
+      grain: 'grit',
+      tilt: 0.3,
     },
   },
   {
@@ -148,11 +230,14 @@ export const STAGES: Stage[] = [
     blurb: 'Heavy enough to sweep your own lane of the cloud clean.',
     analogue: 'Ceres',
     look: { body: 'rock', core: 0xbda183, particle: 0xd6dcec, scale: 0.2,
-      particleSize: 0.9,
-      particleCount: 1.5,
+      particleSize: 0.66,
+      particleCount: 3.1,
       orbit: [0.4, 0.68],
       drag: 0.19,
       lifetime: 16,
+      width: 0.83,
+      grain: 'grit',
+      tilt: 0.38,
     },
   },
   {
@@ -162,11 +247,14 @@ export const STAGES: Stage[] = [
     blurb: 'Heavy enough to pull yourself round. Gravity has started winning arguments.',
     analogue: 'the Moon',
     look: { body: 'world', core: 0xc9b193, particle: 0xdde0ee, scale: 0.28,
-      particleSize: 1.15,
-      particleCount: 0.98,
+      particleSize: 0.78,
+      particleCount: 2.4,
       orbit: [0.35, 0.62],
       drag: 0.23,
       lifetime: 15,
+      width: 0.78,
+      grain: 'rock',
+      tilt: 0.46,
     },
   },
   {
@@ -176,11 +264,14 @@ export const STAGES: Stage[] = [
     blurb: 'Rock and metal, settled into layers. The heavy things have sunk to the middle.',
     analogue: 'Earth',
     look: { body: 'world', core: 0x6fa8dc, particle: 0xbfe0ff, scale: 0.38,
-      particleSize: 1.6,
-      particleCount: 0.54,
+      particleSize: 0.92,
+      particleCount: 1.9,
       orbit: [0.3, 0.55],
       drag: 0.28,
       lifetime: 13,
+      width: 0.72,
+      grain: 'rock',
+      tilt: 0.53,
     },
   },
   {
@@ -190,11 +281,14 @@ export const STAGES: Stage[] = [
     blurb: 'The hydrogen stops escaping. You begin to keep what you catch.',
     analogue: 'Jupiter',
     look: { body: 'gas', core: 0xd9a066, particle: 0xffd9a0, scale: 0.52,
-      particleSize: 2.0,
-      particleCount: 0.37,
+      particleSize: 1.05,
+      particleCount: 1.5,
       orbit: [0.26, 0.48],
       drag: 0.33,
       lifetime: 12,
+      width: 0.66,
+      grain: 'rock',
+      tilt: 0.58,
     },
   },
   {
@@ -204,57 +298,161 @@ export const STAGES: Stage[] = [
     blurb: 'Thirteen Jupiters. The core is hot enough to burn deuterium — not a star yet, but no longer cold.',
     analogue: '13 Jupiter masses',
     look: { body: 'ember', core: 0xb05a3c, particle: 0xffb98a, scale: 0.64,
-      particleSize: 2.5,
-      particleCount: 0.25,
+      particleSize: 1.18,
+      particleCount: 1.2,
       orbit: [0.22, 0.42],
       drag: 0.38,
       lifetime: 11,
+      width: 0.6,
+      grain: 'rock',
+      tilt: 0.62,
     },
   },
+  // --- the main sequence ---------------------------------------------------------------
+  //
+  // The gaps widen on the way up, because the stars do: an O star is not a little heavier
+  // than a B star, it is several times heavier, and the cloud that makes one is vast. The
+  // promotion multiplier is derived from the gap, so a wider one pays a larger step and the
+  // climb keeps its pace — a class simply lasts longer the hotter it is.
+  //
+  // Size barely changes across the seven, on purpose. Real main-sequence radii span a factor
+  // of twenty; drawn to scale a red dwarf would be a dot and nothing would be learned from
+  // it. What the classes differ by, on screen, is colour and surface.
   {
     id: 'redDwarf',
     name: 'Red Dwarf',
     threshold: D(6e14),
     blurb: 'Eighty Jupiters. Hydrogen fusion holds against your own weight. You are a star.',
     analogue: '0.08 solar masses',
+    spectral: 'M',
+    fate: 'ember',
     look: { body: 'star', core: 0xff7a45, particle: 0xffc08a, scale: 0.74,
-      particleSize: 3.0,
-      particleCount: 0.185,
+      particleSize: 1.3,
+      particleCount: 1.0,
       orbit: [0.18, 0.37],
       drag: 0.44,
       lifetime: 10,
+      width: 0.55,
+      grain: 'rock',
+      tilt: 0.66,
     },
   },
   {
-    id: 'star',
-    name: 'Star',
-    threshold: D(1.2e17),
-    blurb: 'Hydrogen to helium, steadily, for a long time. The cloud around you is lit from inside now.',
+    id: 'orangeDwarf',
+    name: 'Orange Dwarf',
+    threshold: D(6e16),
+    blurb: 'Steadier than the Sun and longer lived. If anything is going to have time to happen nearby, it is here.',
+    analogue: '0.7 solar masses',
+    spectral: 'K',
+    fate: 'nebula',
+    look: { body: 'star', core: 0xffa95e, particle: 0xffcf9a, scale: 0.79,
+      particleSize: 1.34,
+      particleCount: 0.95,
+      orbit: [0.17, 0.35],
+      drag: 0.47,
+      lifetime: 9.5,
+      width: 0.53,
+      grain: 'rock',
+      tilt: 0.67,
+    },
+  },
+  {
+    id: 'yellowDwarf',
+    name: 'Yellow Dwarf',
+    threshold: D(1.2e19),
+    blurb: 'Hydrogen to helium, steadily, for ten billion years. The cloud around you is lit from inside now.',
     analogue: 'the Sun',
-    look: { body: 'star', core: 0xfff3c4, particle: 0xffe6b0, scale: 0.86,
-      particleSize: 3.6,
-      particleCount: 0.137,
-      orbit: [0.15, 0.32],
+    spectral: 'G',
+    fate: 'nebula',
+    look: { body: 'star', core: 0xfff3c4, particle: 0xffe6b0, scale: 0.84,
+      particleSize: 1.38,
+      particleCount: 0.905,
+      orbit: [0.16, 0.33],
       drag: 0.5,
       lifetime: 9,
+      width: 0.51,
+      grain: 'rock',
+      tilt: 0.68,
     },
   },
   {
-    id: 'supergiant',
-    name: 'Supergiant',
-    threshold: D(1.5e19),
-    blurb: 'Carbon, oxygen, silicon. Each shell you light burns faster than the last, and iron is waiting.',
-    analogue: '20 solar masses',
-    look: { body: 'star', core: 0xffb347, particle: 0xffd0a0, scale: 1,
-      particleSize: 4.2,
-      particleCount: 0.107,
+    id: 'whiteStar',
+    name: 'White Star',
+    threshold: D(6e21),
+    blurb: 'Hot enough that the surface has stopped boiling. The granulation is fading out.',
+    analogue: 'Procyon',
+    spectral: 'F',
+    fate: 'nebula',
+    look: { body: 'star', core: 0xfffaf0, particle: 0xfff0d8, scale: 0.88,
+      particleSize: 1.41,
+      particleCount: 0.875,
+      orbit: [0.15, 0.31],
+      drag: 0.52,
+      lifetime: 8.8,
+      width: 0.5,
+      grain: 'rock',
+      tilt: 0.69,
+    },
+  },
+  {
+    id: 'blueWhiteStar',
+    name: 'Blue-White Star',
+    threshold: D(6e24),
+    blurb: 'Twice the Sun, twenty times as bright. The envelope carries its heat as light, and the surface is smooth.',
+    analogue: 'Sirius',
+    spectral: 'A',
+    fate: 'nebula',
+    look: { body: 'star', core: 0xdfe8ff, particle: 0xe6ecff, scale: 0.92,
+      particleSize: 1.44,
+      particleCount: 0.847,
+      orbit: [0.14, 0.3],
+      drag: 0.54,
+      lifetime: 8.5,
+      width: 0.49,
+      grain: 'rock',
+      tilt: 0.7,
+    },
+  },
+  {
+    id: 'blueGiant',
+    name: 'Blue Giant',
+    threshold: D(2e28),
+    blurb: 'Past eight solar masses. There is no quiet ending from here: when this one goes, it goes at once.',
+    analogue: 'Rigel',
+    spectral: 'B',
+    fate: 'supernova',
+    look: { body: 'star', core: 0xb9ccff, particle: 0xd0dcff, scale: 0.96,
+      particleSize: 1.47,
+      particleCount: 0.82,
+      orbit: [0.13, 0.29],
+      drag: 0.56,
+      lifetime: 8.2,
+      width: 0.47,
+      grain: 'rock',
+      tilt: 0.71,
+    },
+  },
+  {
+    id: 'blueSupergiant',
+    name: 'Blue Supergiant',
+    threshold: D(2e32),
+    blurb: 'One star in three million. It will burn through everything it has in the time the Sun takes to warm up.',
+    analogue: 'Alnitak',
+    spectral: 'O',
+    fate: 'supernova',
+    look: { body: 'star', core: 0x9bb7ff, particle: 0xc2d2ff, scale: 1,
+      particleSize: 1.5,
+      particleCount: 0.796,
       orbit: [0.12, 0.28],
       drag: 0.58,
       lifetime: 8,
+      width: 0.46,
+      grain: 'rock',
+      tilt: 0.72,
     },
   },
 
-  // --- reached by collapse, not by accretion (Phase 3) -------------------------------
+  // --- what a star becomes, not what it grows into ---------------------------------------
   {
     id: 'neutronStar',
     name: 'Neutron Star',
@@ -262,11 +460,14 @@ export const STAGES: Stage[] = [
     blurb: 'What the supernova left. A fraction of the mass, in a city-sized ball, spinning fast.',
     analogue: '1.4 solar masses',
     look: { body: 'remnant', core: 0xdfefff, particle: 0xcfe2ff, scale: 0.12,
-      particleSize: 1.2,
-      particleCount: 1.1,
+      particleSize: 1.1,
+      particleCount: 1.5,
       orbit: [0.1, 0.24],
       drag: 0.7,
       lifetime: 9,
+      width: 0.62,
+      grain: 'rock',
+      tilt: 0.74,
     },
   },
   {
@@ -276,17 +477,57 @@ export const STAGES: Stage[] = [
     blurb: 'Past the Tolman-Oppenheimer-Volkoff limit, nothing holds. Not even light leaves.',
     analogue: 'beyond 2.3 solar masses',
     look: { body: 'hole', core: 0x1a1626, particle: 0xd8b8ff, scale: 0.45,
-      particleSize: 2.0,
-      particleCount: 0.6,
+      particleSize: 1.35,
+      particleCount: 1.0,
       orbit: [0.08, 0.2],
       drag: 0.8,
       lifetime: 10,
+      width: 0.8,
+      grain: 'rock',
+      tilt: 0.8,
     },
   },
 ];
 
-/** Stages you can reach by accreting. The tail of the ladder arrives with the supernova. */
+/** Stages you can reach by accreting. The rest are what a star leaves, not what it grows into. */
 export const ACCRETION_STAGES: Stage[] = STAGES.filter((s) => s.threshold !== null);
+
+/** Index of the first star on the ladder: the moment there is something to keep. */
+export const IGNITION_STAGE = ACCRETION_STAGES.findIndex((s) => s.spectral !== undefined);
+
+/** Index of the last. */
+export const SUMMIT_STAGE = ACCRETION_STAGES.length - 1;
+
+/**
+ * Where the hottest class ends.
+ *
+ * Every other class ends where the next begins. This one has nothing above it, so its far
+ * edge has to be stated: around a hundred and fifty solar masses, past which a star blows
+ * its own envelope off faster than it can gather it.
+ */
+export const SEQUENCE_END = D(2e37);
+
+/** Ladder index of a stage, by id. Throws on an id the ladder does not have. */
+export function stageIndexById(id: string): number {
+  const index = STAGES.findIndex((s) => s.id === id);
+  if (index < 0) throw new Error(`No stage called "${id}"`);
+  return index;
+}
+
+/** 0 for M through 6 for O, or -1 for a stage that is not a star. */
+export function classIndexOf(stage: number): number {
+  return stage >= IGNITION_STAGE && stage <= SUMMIT_STAGE ? stage - IGNITION_STAGE : -1;
+}
+
+/** The ladder index of a spectral class, counted from M. */
+export function stageOfClass(classIndex: number): number {
+  return IGNITION_STAGE + Math.max(0, Math.min(SUMMIT_STAGE - IGNITION_STAGE, classIndex));
+}
+
+/** The mass at which a stage ends: where the next begins, or the end of the sequence. */
+export function ceilingMass(stage: number): Num {
+  return ACCRETION_STAGES[stage + 1]?.threshold ?? SEQUENCE_END;
+}
 
 export function stageAt(index: number): Stage {
   const stage = STAGES[Math.max(0, Math.min(STAGES.length - 1, index))];
@@ -302,6 +543,26 @@ export function stageIndexFor(totalMassEver: Num): number {
     if (threshold && totalMassEver.gte(threshold)) return i;
   }
   return 0;
+}
+
+/**
+ * How much more a rebased upgrade costs at this stage than at the bottom of the ladder.
+ *
+ * Taken from the ladder's own thresholds rather than from a constant. An upgrade that resets
+ * every promotion has to be repriced every promotion too, or the reset is theatre: at
+ * Supergiant, two hundred levels from a base of 30 mass is free. Tying the price to the
+ * threshold means moving a threshold moves the pricing with it, instead of silently changing
+ * how many levels a stage is worth buying.
+ *
+ * Tracking wealth exactly (this ratio, not some power of it) is the point: a rebased upgrade
+ * should be worth about the same number of levels at every stage, so its contribution stops
+ * compounding across the run. What it gives up is paid back by the promotion multiplier.
+ */
+export function costScaleAt(index: number): Num {
+  const anchor = ACCRETION_STAGES[1]?.threshold;
+  const here = ACCRETION_STAGES[Math.max(0, Math.min(ACCRETION_STAGES.length - 1, index))]?.threshold;
+  if (!anchor || !here || here.lte(anchor)) return D(1);
+  return here.div(anchor);
 }
 
 export interface StageProgress {

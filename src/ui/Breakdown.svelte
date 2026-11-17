@@ -6,7 +6,11 @@
 
 <!--
   The whole economy, in one line. A player who reads this understands the game; every later
-  system will enter by multiplying one of these four terms.
+  system will enter by multiplying one of these terms.
+
+  The ladder gets its own line rather than being folded into efficiency. It is the one term
+  you do not buy, and leaving it inside a number labelled "efficiency" was the whole reason
+  promotions felt like they paid nothing — they always would have, invisibly.
 -->
 <section class="breakdown">
   <h2>How mass is made</h2>
@@ -28,6 +32,12 @@
       <span class="label">efficiency</span>
       <span class="value num">{view.globalMultiplier}</span>
     </li>
+    {#if view.ladderBonus}
+      <li class="ladder">
+        <span class="label">the ladder</span>
+        <span class="value num">{view.ladderBonus}</span>
+      </li>
+    {/if}
   </ol>
 
   <p class="total">

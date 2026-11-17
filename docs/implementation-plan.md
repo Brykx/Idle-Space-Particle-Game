@@ -10,24 +10,32 @@ src/
     upgrades.ts        # upgrade defs as DATA (id, cost curve, effect, unlock)
     stages.ts          # the stage ladder as DATA (threshold, blurb, analogue, look)
     elements.ts        # the fusion chain as DATA (multiplier, throughput needed)
-    economy.ts         # deriveRates(state) -> Rates ; tick(state, dt)
+    economy.ts         # deriveRates(state) -> Rates ; tick(state, dt) ; the currents
+    clouds.ts          # what a run condenses from: ceiling, pace, trait; the seeded offers
+    sky.ts             # letting a star go, the catalogue, the bounded tree
+    forecast.ts        # "within the hour": runs a copy of the star to find out
     offline.ts         # catch-up integration + away summary
-    prestige.ts        # reset layers, stardust/singularity formulas
     save.ts            # serialize, deserialize, MIGRATIONS[]
   render/
-    Field.ts           # the only file that imports pixi; init/setRates/pulse/destroy
+    Field.ts           # the only file that imports pixi; setRates/setSky/setCloud/release
+    sky.ts             # the turning night sky, and your stars in it
+    release.ts         # a shell of gas or a supernova, and the light rising to its place
+    nebula.ts          # the cloud's nebula and the shell, generated on a canvas
     shading.ts         # the GLSL: a shared impostor preamble + one surface per BodyKind
     impostor.ts        # Pixi plumbing for the shader bodies
     textures.ts        # procedural canvas bodies — the fallback when WebGL is unavailable
     pool.ts            # pre-allocated particle pool, zero per-frame allocation
-    effects.ts         # pulse, ignition, supernova, lensing
-  ui/                  # Svelte components; read snapshots, dispatch intents
-  game.ts              # the loop: accumulator, visibility, autosave — wires all three
+  audio/
+    ambience.ts        # the generated drone, notes and bell; renders offline for tests
+  ui/                  # Svelte: the caption, the whisper, the sheet and its pages
+  game.svelte.ts       # the loop: accumulator, visibility, autosave — wires all three
   main.ts
 tests/
-  economy.test.ts  save-migration.test.ts  balance.test.ts
+  economy  automation  sky  promotion  stages  energy  save  balance  numbers  field
+  e2e/smoke.spec.ts    # the browser, including a phone viewport and the audio
 tools/
-  balance.ts           # headless pacing sim -> time-to-milestone table
+  balance.ts           # headless pacing and career sim -> time to stage, day to class
+  bodies.ts            # a gallery of every body, release and sky
 ```
 
 Three rules hold the whole thing together:
@@ -86,7 +94,7 @@ Shipped: 39 unit tests, 7 browser smoke tests, and a pacing report wired into CI
 went through three passes before the curve held its shape — see the balance section of the
 design doc.
 
-### Phase 2 — Depth and automation ← *in progress*
+### Phase 2 — Depth and automation — **done**
 
 **Stage ladder — done.** Fourteen stages from dust to black hole, driven by lifetime mass,
 each with its own core appearance that the renderer morphs between. It replaces the milestone
@@ -138,28 +146,84 @@ risk table.
 
 Still to do:
 
-- **A promotion should pay, and Density should rebase** — the last new upgrade card appears
-  ~20 minutes in and the ladder runs to ~55, and reaching a stage currently moves income by
-  nothing at all. The design is worked out in the design doc: Density resets and rebases at
-  each stage, and a promotion grants x3 to carry the exponent share Density gives up. The two
-  are one change — shipping either alone either makes promotion a punishment or collapses the
-  cost-exponent sum to 0.71 and walls the late game. Second-tier cards follow after.
-- **Achievements, the remaining ~37.** 23 are in. The set is meant to reach about 60.
+- **A promotion pays, and Density rebases — done.** Reaching a stage multiplies income by
+  `10 ^ (share x gap)`, derived from the ladder's own thresholds rather than fixed, and
+  Particle Density resets and reprices at every promotion. The two are one change: shipping
+  either alone either makes a promotion a punishment or collapses the curve to polynomial.
+  Written up in the design doc, including the two numbers the concept got wrong and the bot
+  bug the tuning uncovered. Save version 2, with the first migration this project has
+  actually run.
+- **Achievements — done, 61 of them.** Landmarks on the ladder, mass milestones, the element
+  chain, the disk, upgrade depth, how you play, and the supernova. Each is worth 2%, so the
+  full set is x3.35 — bounded, which is why it shifts the curve by about ten minutes rather
+  than changing its slope. Measured: Supergiant moved from 1:15 to 1:04.
+
+  `awardAchievements` takes the whole `Rates` now instead of a handful of scalars off it, so
+  a new condition never means changing the signature and every call site with it.
 - **The iron wall** — iron is already listed as unreachable, but reaching the end of the
   chain does not yet *stall* anything. Making it bite belongs with Phase 3, because a wall
   with no way through it is the worst state to leave a player in.
 
 **Done when:** a 6-hour session has something new every ~20 minutes.
 
-### Phase 3 — Supernova prestige (~2 days)
-Reset layers, stardust formula, the permanent tree, nebula restart state, the supernova
-sequence itself, and the iron wall that prompts it. Tabs already arrived in Phase 2, so the
-navigation for it exists.
+### Phase 3 — Supernova prestige — done
 
-**Done when:** run 2 reaches the Brown Dwarf stage in under a third of run 1's time and feels
-different doing it.
+`sim/prestige.ts` holds all of it: the Stardust formula, the five-card permanent tree, and
+the collapse itself. Everything the tree does to income enters `deriveRates` at a single
+point, because a prestige layer that reaches into four terms is one nobody can balance.
 
-### Phase 4 — Visual pass (~2-3 days)
+**Measured against the bar.** Collapsing ten minutes past the top of the ladder pays 115
+stardust, and run 2 reaches Brown Dwarf 3.2x faster — the bar was "under a third". The whole
+ladder comes in 2.8x faster. Collapsing the instant the ladder tops out pays 12 and is worth
+1.7x; waiting twenty-five minutes pays 7,450 and is worth 16x. That spread is the decision
+the layer is built around, and `npm run balance` prints all three so a tuning change cannot
+quietly flatten it.
+
+**Stardust is a `Decimal`.** It goes as mass to the 0.6 and mass has no ceiling, so a plain
+number stops counting somewhere in run three or four. The project already carries an exact
+big-number type; a prestige currency opting out of it is a bug with a long fuse.
+
+**What survives a collapse is chosen, not incidental.** Achievements, because you did them.
+Levels *ever* bought, so a collapse never takes back an auto-buyer — the tree has its own
+answer to automation and removing the floor at the moment you start over would make run two a
+worse run one for twenty minutes. Auto-buy toggles, because they are a preference. Everything
+else goes, `stageSeen` included, so the ladder announces itself again.
+
+**The iron wall** turned out to need no new mechanic. The chain already stops at silicon and
+the ladder already stops at Supergiant; what was missing was a way *through*, which is what
+this phase is. The Collapse tab says so in as many words.
+
+Still open here: the second prestige (Act IV) is Phase 5, and the Neutron Star and Black Hole
+stages remain unreachable by play — the remnant is shown for six seconds after a collapse,
+which is the only place that body appears in the game.
+
+### Phase 4½ — The zen redesign — **done**
+
+Not a phase anyone planned, and the most consequential one. The brief became *calmer, and
+satisfying for longer*, and both halves turned out to be about logic rather than picture. The
+reasoning and the measurements are in [`zen-redesign.md`](zen-redesign.md); what was built,
+in the order it was built:
+
+1. **The calm core.** Gravity Pulse stopped paying. A current opens with one purchase instead
+   of twenty-five and flows by default; the automation became value-aware, buying by payback
+   with a horizon measured in the run's own tenfolds. An absence is credited for a month.
+2. **The long game.** A run is one star from a finite cloud; the ladder's top became the real
+   spectral sequence M to O; letting a star go puts it in a sky that persists, pays a bounded,
+   log-based yield, and offers the next cloud. The tree became four cards that all end.
+3. **Calibration.** The balance tool plays careers. The first tree finished in six days with
+   late Suns taking minutes; weakened, repriced and with a steeper pace ladder, the summit is
+   two weeks away and the frontier is always a long run.
+4. **The interface.** The field is the whole screen; one caption; a sheet you summon, which is
+   also, finally, the phone layout. Numbers are words. Announcements fade.
+5. **The field.** Your stars in a turning sky, the cloud as a nebula, a shell or a supernova
+   when a star is let go and its light rising to its place, stars coloured by temperature,
+   rocks lit from the core.
+6. **Sound**, generated and off until asked for.
+
+Save version 5 carries old saves across: Stardust re-denominated on a log scale, the run
+continuing from the first cloud.
+
+### Phase 4 — Visual pass — **mostly done**
 
 - **Field identity per stage — done.** `StageLook` carries particle size, count, orbit range,
   drag and lifetime; particles get bigger and fewer as the core climbs, with the lit area
@@ -204,34 +268,120 @@ different doing it.
   `textures.ts` stays as the fallback for a renderer that cannot run GLSL, and `bodies.html`
   (dev only, not in the build) mounts the field on its own so the last two stages — which
   carry no mass threshold and arrive with the supernova — can be looked at at all.
-- Field **width** per stage, the one part of field identity still open.
-- Bloom, camera easing, audio layer.
+- **Field width per stage — done, and it is the weakest of the five levers.** `StageLook`
+  carries a `width`, and the field narrows from filling the frame at Dust to 0.46 of it at
+  Supergiant. Narrowing the spawn ring alone changed nothing visible, because a flyby swings
+  wider than it started: the field only reads as having an edge once particles dim beyond it,
+  which is the rule that had to be added to make the feature exist at all. Even then the
+  effect is subtle next to size, count, orbit and body. Kept, but it earns less than the
+  other four.
+
+  Two real things came out of building it. `spawnRadius` and the screen's own reach were one
+  number, and every use of it meant one of the two — the kill radius and the approach
+  brightening both wanted the screen, the emission ring wanted the stage. And the particle
+  fade-in was computed against the stage's `lifetime` rather than against the particle's own,
+  which is a *negative* alpha for the three in ten that draw a longer life than average. They
+  had been invisible for their first seconds since the pool was written.
+- **A field that reads as a system — done.** `StageLook` carries a `grain` and a `tilt`.
+  Grain decides what a single particle *is*: motes for dust, grit through the rocky middle,
+  lit irregular meteoroids from Protoplanet up, drawn with normal blending so they have a
+  dark side. Tilt flattens the field from face-on at Dust towards a disc seen from above its
+  plane — the simulation still runs in the orbital plane and only the projection is squashed,
+  which is exactly what a circular orbit looks like from an angle.
+
+  The size-and-count ladder was rebalanced with it. The first pass took "bigger and fewer"
+  far too far, and that was invisible while the sprites were white dots: a solar system does
+  not read as a star surrounded by moons, it reads as a large central body and small traffic.
+
+  Two things it exposed. Stretching a sprite along its velocity is what a streak *is*, and it
+  works only because a soft dot has no shape to distort — lit bodies now keep their outline
+  and tumble. And additive blending cannot occlude, so a meteoroid passing behind a star had
+  the star's light added on top of it; everything with a surface now has an opaque hole
+  punched for it first.
+- **A night sky — done.** ~1800 stars with a power-law magnitude distribution, colour by
+  temperature weighted towards the cool end, and a galactic band tilted across the frame. The
+  old version was 260 identical dots at one brightness, which reads as noise on a lens. None
+  of the three fixes is "more dots", and the reasoning is in `visual-design.md`. Seeded, so a
+  resize does not reshuffle the constellations; static after build, one draw call.
+- Remaining visual work is catalogued in `visual-design.md` rather than listed here, because
+  it stopped being a to-do list and became a set of choices with costs against them. The
+  short version: depth sorting across the disc, the core acting as the light source, a real
+  supernova sequence, and a slow zoom out as the core climbs. Bloom is explicitly **not** on
+  the list — see the direction section of that document for why.
 
 The Phase 1 renderer interface means all of this touches `render/` only.
 
-**Done when:** the moment the core ignites is worth recording.
+**Done when:** the moment the core ignites is worth recording. *Not yet true — the supernova
+is currently a six-second remnant and a banner, and that is the one moment in the game that
+should be worth recording.*
 
-### Phase 5 — Black hole + challenges (~3 days)
-Second prestige, Hawking radiation, jets, time dilation, lensing shader, the challenge
-framework, endgame content.
+---
 
-### Phase 6 — Ship (~2 days)
-Balance pass driven by `tools/balance.ts`, mobile layout, PWA, performance profiling on a
-real low-end device, README and screenshots. The Playwright smoke suite landed in Phase 1 and
-has grown with each phase since.
+## The plan, re-examined
 
-### Phase 7 — The Bounce and the second half (vision only)
+*Phases 1 to 3 shipped roughly as written. The order of what is left no longer does, and it is
+worth saying why rather than quietly renumbering.*
+
+**The game is releasable, and now it is playable.** The zen redesign brought what used to be
+the one blocking item — a phone layout — along with it, because a screen that is one caption
+and a sheet you summon is a phone layout. It also replaced the supernova prestige with a long
+game that lasts weeks rather than an afternoon.
+
+**So shipping still comes before the black hole**, and is smaller than it was.
+
+There is a second, smaller reversal kept from before. The old Phase 5 bundled "second
+prestige" with "challenges". Those are not one thing: the second prestige is the *content*
+the remnants exist for, and challenges are a retention mechanic for players who have
+exhausted it. Splitting them means the black hole can ship without waiting for a framework
+nobody has asked for yet.
+
+### Phase 5 — Ship (~2 days)
+
+- **Performance on a real low-end device**, not on a desktop with the profiler open. The
+  particle budget slider exists for this and has never been tested against a phone, and the
+  sky, the nebula and the release add draw calls of their own.
+- **PWA**, so it survives being added to a home screen and closed — which matters more now
+  that runs are measured in hours and a career in weeks.
+- Screenshots.
+
+**Done when:** someone can play it on a phone on a train without being told how.
+
+### Phase 6 — The black hole (~3 days)
+
+Second prestige. Accrete past the TOV limit, reset Stardust for Singularities, and unlock
+*mechanics* rather than numbers: Hawking radiation as offline income, relativistic jets as an
+active layer that is not clicking, time dilation as a literal simulation-speed multiplier, and
+the lensing shader — which is worth much more now that there is a real starfield behind it to
+bend.
+
+This is also what finally makes the Neutron Star and Black Hole reachable by playing. They
+have shaders, and today the neutron star appears only as the point a supernova leaves for a
+few seconds. The neutron stars your B and O stars leave are the natural place for it to start:
+a remnant chosen from your own sky, rather than a fresh ladder.
+
+**Done when:** the second prestige changes how the game is played, not how fast.
+
+### Phase 7 — Challenges (~2 days)
+
+Restricted runs with their own rewards — no auto-buyers, no energy, a hard time limit. Cheap
+to build on top of the existing state, because a challenge is a flag plus a predicate over
+`deriveRates`, and the economy is pure.
+
+Deliberately after the black hole: challenges are what you give a player who has finished
+everything, and there is currently no "everything" to have finished.
+
+### Phase 8 — The Bounce and the second half (vision only)
 
 A third prestige that ends the inward game and starts an outward one: the core's interior
 becomes a Big Bang, and the universe it seeds grows life at the Planet stage, up a Kardashev
 ladder to a galactic civilisation. The currency it grants is not a multiplier but the physical
 constants of the next universe.
 
-Written up in the design doc. **Not scheduled**, and not to be started before Phase 5 ships
-and people have played the first half — it is larger than Acts I to V put together. It is
-recorded now so the first half is built without closing the door on it, which mostly means
-keeping what is already true: ladders as data, the renderer behind an interface, and an
-economy with no DOM in it.
+Written up in the design doc. **Not scheduled**, and not to be started before the black hole
+ships and people have played the first half — it is larger than everything before it put
+together. It is recorded now so the first half is built without closing the door on it, which
+mostly means keeping what is already true: ladders as data, the renderer behind an interface,
+and an economy with no DOM in it.
 
 ## Testing strategy
 
@@ -248,8 +398,16 @@ The economy is pure, so it gets real tests rather than token ones:
   the curve's early slope against its late slope, so a tuning tweak that doubles the first
   hour, opens a wall, or collapses the late game fails CI instead of shipping.
 
-Rendering gets one Playwright smoke test (load, buy, reload, mass persisted) and otherwise
-gets looked at by a human, which is the honest way to test a particle field.
+- **Careers** — a short simulated career asserts the second star is quicker than the first
+  but not trivially so; a run with everything permanent bought asserts the summit is still a
+  night's work. The tuning these replaced finished the whole tree in six days.
+
+The browser tests drive the game as a player would — begin a current from the caption, let a
+star go and choose the next cloud, survive a reload — on a desktop and a phone viewport, and
+check the field by its pixels where it can be checked that way: every body draws with
+structure, and between stars the centre is empty. The ambience is rendered offline and its
+samples checked. Everything else about the picture gets looked at by a human, which is the
+honest way to test a particle field.
 
 ## Risks
 
@@ -262,10 +420,30 @@ gets looked at by a human, which is the honest way to test a particle field.
 | A flat multiplier silently rescales the whole game | With cost exponents summing to ~1, income tracks capital, so any constant multiplier changes the growth *rate*. A x1500 element chain made the game ~70x faster. Multipliers stay small, and `tests/energy.test.ts` asserts the top of the chain stays under x10 |
 | Feedback between the two currencies | Energy is taxed from the *raw* infall, before the element multiplier, so a tier can never fund the disk level that reaches the next tier. Gating tiers on throughput rather than on energy/second stops fixed thresholds from being crossed all at once as income inflates |
 | Offline quietly pays less than being present | Auto-buyers make income a feedback loop, so the catch-up step size now sets accuracy, not just speed. Steps are capped at half a second while automation is running (60s when it is not, where the rate barely moves), and a test asserts the integration is converged at that step |
-| Scope drift into Acts IV-V | Phases ship independently; the game is releasable from the end of Phase 3 |
+| The long game collapses into an afternoon | The tree is bounded, the yield is log-based and capped by the cloud, and a career simulation runs in CI: the summit has to stay a night's work with everything bought |
+| Scope drift into Acts IV-V | Phases ship independently; the game is releasable now |
 
 ## What is open
 
-Phases 2 through 6, in the order above. The game is releasable from the end of Phase 3; the
-three items most worth doing next are the two reported from play — second-tier upgrades so
-the Core tab keeps changing, and per-stage particle character — and then the supernova.
+Phases 5 through 8, in the order above, plus the tail of Phase 4.
+
+The game is complete enough to release and to play on a phone: a first star of about two
+hours, a sky that fills over weeks, a bounded tree, about seventy achievements, and nothing
+that asks for you. What it is missing is a home-screen install and a test on a real phone.
+
+After shipping, the black hole. Then the things the zen redesign deliberately did not do,
+recorded in its §5 so they are not forgotten:
+
+- **Forks at promotions** — rings or moons, ocean or desert: the natural next layer of
+  identity for a single run, each needing its own visuals to be worth choosing.
+- **Constellations** — lines between your stars, once a sky has enough of them.
+- **Second-tier upgrades** — Frame Dragging, Tidal Shear, Radiation Pressure. Each adds to
+  the cost-exponent sum, so each must take share from a tier-one upgrade or be tuned small;
+  and with automation doing the buying, a new current is about what the field shows rather
+  than about another thing to click.
+- **Capture is finished by design, and its rows say so.** Gravity Well and Capture Radius
+  settle for most of a run. Rebasing them was considered and rejected — capture is bounded at
+  1, so resetting it costs a fixed ~4x at every promotion and the promotion multiplier would
+  have to be inflated by the same 4x to cancel it. Two large numbers whose visible net effect
+  is what you would get from neither is bookkeeping, not a mechanic. The honest reading is
+  that capture is an *onboarding* term: bounded, front-loaded, finished.
