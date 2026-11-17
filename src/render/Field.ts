@@ -90,6 +90,9 @@ const MAX_VISUAL_SPAWN = 260;
  */
 const MIN_VISUAL_SPAWN = 22;
 
+/** The radius the occluding disc is tessellated at, before it is scaled to the body. */
+const OCCLUDER_RADIUS = 512;
+
 /** Where the light comes from on every rock sprite: the upper left, as on every body. */
 const SPRITE_LIGHT_ANGLE = Math.atan2(-0.58, -0.52);
 
@@ -261,7 +264,10 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
    * onto that. Dust is the exception, because a cloud genuinely does not occlude.
    */
   const occluder = new Graphics();
-  occluder.circle(0, 0, 1).fill(0x000000);
+  // Built large and scaled down, never small and scaled up: Pixi tessellates a circle by the
+  // radius it is drawn at, and a unit circle blown up to a star's size is a visible polygon
+  // showing through the soft edge of the limb.
+  occluder.circle(0, 0, OCCLUDER_RADIUS).fill(0x000000);
 
   app.stage.addChild(sky.view, nebula, field, halo, corePrevious, core, occluder);
   if (bodies) app.stage.addChild(bodies.view);
@@ -670,7 +676,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     const solid = shownBody !== 'mote';
     occluder.visible = solid && presence > 0.01;
     if (solid) {
-      occluder.scale.set(coreScale * 120 * 0.96);
+      occluder.scale.set((coreScale * 120 * 0.96) / OCCLUDER_RADIUS);
       occluder.alpha = (previousBody === 'mote' ? bodyBlend : 1) * presence;
     }
 
