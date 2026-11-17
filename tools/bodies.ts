@@ -10,6 +10,12 @@ import { STAGES } from '../src/sim/stages';
  * to iterate on a shader without grinding a ladder.
  *
  *   npx vite --port 4174     then open /bodies.html?stage=blackHole
+ *
+ * Other switches, for the parts of the field you cannot see without playing for days:
+ *
+ *   &sky=40              a sky with forty of your stars in it
+ *   &hue=338             the nebula of a cloud of that hue
+ *   &release=supernova   let the star go after two seconds (or nebula, or ember)
  */
 
 const parent = document.getElementById('field') as HTMLElement;
@@ -21,7 +27,8 @@ const scale = Number(new URLSearchParams(location.search).get('scale') ?? stage.
 
 label.textContent = `${stage.name}  ·  ${stage.look.body}`;
 
-const field = await createField(parent, { onPulse: () => field.pulse() });
+const params = new URLSearchParams(location.search);
+const field = await createField(parent, {});
 
 const rates: FieldRates = {
   spawnRate: 30,
@@ -40,8 +47,38 @@ const rates: FieldRates = {
   body: stage.look.body,
   budget: 1200,
   reducedMotion: false,
+  density: 1,
+  present: true,
 };
 field.setRates(rates);
+
+const classes = STAGES.filter((s) => s.spectral);
+const skyCount = Number(params.get('sky') ?? 0);
+const sky = Array.from({ length: skyCount }, (_, i) => {
+  const cls = classes[(i * 5) % classes.length]!;
+  return {
+    id: i + 1,
+    x: 0.08 + 0.84 * ((i * 0.618034) % 1),
+    y: 0.08 + 0.84 * ((i * 0.381966 + 0.2) % 1),
+    colour: cls.look.core,
+    heat: classes.indexOf(cls),
+  };
+});
+field.setSky(sky);
+
+const hue = params.get('hue');
+if (hue !== null) field.setCloud({ seed: 12345, hue: Number(hue) });
+
+const fate = params.get('release');
+if (fate === 'nebula' || fate === 'supernova' || fate === 'ember') {
+  setTimeout(() => {
+    const id = sky.length + 1;
+    const star = { id, x: 0.85, y: 0.3, colour: stage.look.core, heat: 3 };
+    field.setSky([...sky, star]);
+    field.release({ fate, colour: stage.look.core, starId: id });
+    field.setRates({ ...rates, present: false, density: 0 });
+  }, 2000);
+}
 
 // ?cycle=<other stage> flips between the two every few seconds, which is the only way to
 // watch a promotion without playing to it.

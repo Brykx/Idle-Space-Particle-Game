@@ -399,6 +399,11 @@ vec4 shade(vec2 p, float d) {
   float t = max(0.0, d - 1.0);
   float ang = atan(p.y, p.x);
 
+  // How hot the star is, read from its own colour: 0 for a red dwarf, about 0.4 for the Sun,
+  // 1 for a blue supergiant. The colours are blackbody colours, so this is the temperature in
+  // all but units, and everything below that should change along the main sequence reads it.
+  float heat = smoothstep(-0.75, 0.40, uTint.b - uTint.r);
+
   // The corona reaches further along some directions than others, and the pattern turns
   // over slowly enough that you only notice by looking away and back.
   // Both of these depend only on the angle, but they are evaluated per pixel over the whole
@@ -414,8 +419,11 @@ vec4 shade(vec2 p, float d) {
   float arch = smoothstep(0.50, 0.84, noise(vec3(cos(ang) * 3.6, sin(ang) * 3.6, uTime * 0.018 + uSeed * 3.0)));
   float loops = arch * exp(-t * 14.0) * 0.70;
 
-  vec3 hotAir = uTint * 1.15 + vec3(0.22, 0.09, 0.02);
-  vec3 flame = uTint * 0.85 + vec3(0.30, 0.02, 0.0);
+  // Hot stars blow their gas away as a wind rather than holding it up in loops, so the
+  // prominences thin out towards the blue end and what light there is shifts blue with them.
+  loops *= 1.0 - 0.7 * heat;
+  vec3 hotAir = uTint * 1.15 + mix(vec3(0.22, 0.09, 0.02), vec3(0.02, 0.06, 0.18), heat);
+  vec3 flame = uTint * 0.85 + mix(vec3(0.30, 0.02, 0.0), vec3(0.04, 0.06, 0.20), heat);
   vec3 outer = hotAir * (corona + chromo) + flame * loops;
   float outerA = clamp(corona * 0.9 + chromo + loops * 0.8, 0.0, 1.0);
 
@@ -441,15 +449,24 @@ vec4 shade(vec2 p, float d) {
   float limb = 1.0 - 0.68 * (1.0 - mu);
   float faculae = smoothstep(0.55, 0.92, fbm2(b * 7.0 + vec3(uSeed))) * (1.0 - mu) * 0.30;
 
-  float bright = limb * (0.76 + g * 0.44) * (1.0 - spotField(b) * 0.72) + faculae;
+  // A hot star has a radiative envelope and no surface convection: the granules fade out
+  // towards the blue end and so do the spots, which is why a blue giant is smooth next to a
+  // red dwarf. Faded towards their mean rather than to nothing, so the disc keeps its weight.
+  float cool = 1.0 - heat;
+  float grain = mix(g, 0.5, heat * 0.85);
+  float bright = limb * (0.76 + grain * 0.44) * (1.0 - spotField(b) * 0.72 * cool * cool) + faculae * cool;
 
   // A star's colour is its temperature, and the limb is genuinely cooler than the centre --
   // you are looking at shallower, cooler gas. So the ramp runs from ember red at the edge
   // through the stage's own colour to near-white in the hottest granules, multiplied by the
   // tint rather than mixed towards it, which keeps a red dwarf red and a supergiant amber
   // while giving all three the same physics.
-  vec3 cold = uTint * vec3(0.80, 0.30, 0.09);
-  vec3 warm = uTint * vec3(1.12, 0.82, 0.44);
+  //
+  // How far the limb reddens depends on the temperature too. On a red dwarf the cooler gas is
+  // ember red; on the Sun it is only gold; on a blue star the whole ramp stays near white,
+  // and multiplying a blue tint by the red dwarf's ramp is what made one look beige.
+  vec3 cold = uTint * mix(vec3(0.80, 0.30, 0.09), vec3(0.80, 0.80, 0.92), heat);
+  vec3 warm = uTint * mix(vec3(1.12, 0.82, 0.44), vec3(1.0, 1.0, 1.04), heat);
   vec3 hot = mix(uTint, vec3(1.0), 0.50) * 1.05;
   vec3 col = bright < 0.56
     ? mix(cold, warm, smoothstep(0.16, 0.58, bright))
@@ -458,8 +475,11 @@ vec4 shade(vec2 p, float d) {
   // The exposure matters more here than anywhere else on the ladder. A star is the one body
   // bright enough to clip, and everything worth looking at -- the granules, the spots, the
   // limb itself -- lives in the top fifth of the range that clipping throws away.
-  col *= 0.14 + bright * 0.62;
-  col += uFlash * 0.40 * hot;
+  // Hotter stars are also brighter for their size, which is the other half of a blackbody.
+  col *= mix(0.14 + bright * 0.62, 0.26 + bright * 0.74, heat);
+  // What it just swallowed brightens it, less so the hotter it already is: a white star is
+  // near the top of the range already, and the same flash on it only clips.
+  col += uFlash * 0.40 * hot * (1.0 - 0.7 * heat);
   return vec4(mix(outer, col, cov), max(cov, outerA));
 }
 `;

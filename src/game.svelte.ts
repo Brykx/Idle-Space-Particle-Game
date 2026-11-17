@@ -38,8 +38,12 @@ import { forecastCloud, forecastRun, roughly } from './sim/forecast';
 import { STAGES, stageAt, stageIndexById, stageIndexFor, stageOfClass, stageProgress, type Fate } from './sim/stages';
 import { COMPLETE_AT } from './sim/clouds';
 
-/** The neutron star: what a supernova leaves, and the only remnant drawn for now. */
-const REMNANT_STAGE = STAGES.findIndex((stage) => stage.look.body === 'remnant');
+/** Blend two packed RGB colours. */
+function mixRgb(a: number, b: number, t: number): number {
+  const ch = (c: number, s: number) => (c >> s) & 0xff;
+  const m = (s: number) => Math.round(ch(a, s) + (ch(b, s) - ch(a, s)) * t);
+  return (m(16) << 16) | (m(8) << 8) | m(0);
+}
 
 /** Stardust is a counting number, so it is shown as one. */
 function formatStardust(value: number): string {
@@ -78,7 +82,7 @@ function accentOf(rgb: number): string {
 }
 import { deserialize, exportSave as exportSaveString, importSave, serialize } from './sim/save';
 import { clearSave, readSave, writeSave } from './storage';
-import { createField, type FieldHandle } from './render/Field';
+import { createField, type FieldHandle, type SkyStar } from './render/Field';
 
 /**
  * The loop, and the view the UI reads.
@@ -100,13 +104,8 @@ const AUTOSAVE_INTERVAL = 10;
 /** How long an announcement stays on screen. */
 const ANNOUNCE_SECONDS = 5;
 
-/**
- * How long the field keeps showing the remnant after a collapse.
- *
- * Long enough to register as an event rather than a flicker, short enough that it is not in
- * the way of the run that has already started underneath it.
- */
-const SUPERNOVA_SECONDS = 6;
+/** How long letting a star go is a moment, for the parts of the view that wait on it. */
+const RELEASE_SECONDS = 9;
 /** More than this unlocking at once is summarised rather than queued one by one. */
 const ANNOUNCE_BATCH_LIMIT = 2;
 /** A gap larger than this is treated as an absence and credited through the offline path. */
@@ -598,7 +597,7 @@ function createGame() {
     // The caption: one line about what comes next, in words.
     view.accent = accentOf(stageAt(progress.index).look.core);
     if (!cloud) {
-      view.captionNext = 'Between stars. Choose the next cloud when you like.';
+      view.captionNext = 'Choose the next cloud when you like.';
       view.hairline = 0;
     } else if (rates.complete) {
       view.captionNext = 'Its cloud is spent. Let it go when you like.';
@@ -850,23 +849,43 @@ function createGame() {
   function refreshField(): void {
     if (!field) return;
     const rates = deriveRates(state);
-    // Just after a collapse the field shows what you became rather than what you are now.
-    // The run underneath has already restarted; this is only the view lagging on purpose.
-    const remnant = state.playTime < releasingUntil;
-    const { look } = remnant ? stageAt(REMNANT_STAGE) : stageAt(stageIndexFor(state.totalMassEver));
+    const { look } = stageAt(stageIndexFor(state.totalMassEver));
+
+    // What kind of cloud it is changes what falls in, and only that: an icy cloud is a fine
+    // pale snow, a ferrous one is dark and heavy, a turning one swings round before it drops.
+    let particleColour = look.particle;
+    let particleSize = look.particleSize;
+    let particleCount = look.particleCount;
+    let orbit = look.orbit;
+    switch (state.cloud?.trait) {
+      case 'icy':
+        particleColour = mixRgb(look.particle, 0xe2f2ff, 0.45);
+        particleSize *= 0.85;
+        particleCount *= 1.3;
+        break;
+      case 'ferrous':
+        particleColour = mixRgb(look.particle, 0xa07a5e, 0.45);
+        particleSize *= 1.12;
+        particleCount *= 0.8;
+        break;
+      case 'turning':
+        orbit = [Math.min(0.95, orbit[0] * 1.25), Math.min(0.97, orbit[1] * 1.25)];
+        break;
+      default:
+        break;
+    }
+
     field.setRates({
       // Emission tracks the real spawn rate until it outgrows the screen, then grows
       // logarithmically so the field keeps thickening without ever flooding.
-      // The field thins as the cloud is spent, and is empty between stars: completion looks
-      // like stillness.
-      spawnRate: (rates.spawnRate <= 60 ? rates.spawnRate : 60 + Math.log10(rates.spawnRate / 60) * 80) * rates.remaining,
+      spawnRate: rates.spawnRate <= 60 ? rates.spawnRate : 60 + Math.log10(rates.spawnRate / 60) * 80,
       captureFraction: rates.captureFraction,
       coreScale: look.scale,
       coreColour: look.core,
-      particleColour: look.particle,
-      particleSize: look.particleSize,
-      particleCount: look.particleCount,
-      orbit: look.orbit,
+      particleColour,
+      particleSize,
+      particleCount,
+      orbit,
       drag: look.drag,
       lifetime: look.lifetime,
       width: look.width,
@@ -875,7 +894,33 @@ function createGame() {
       body: look.body,
       budget: state.settings.particleBudget,
       reducedMotion: state.settings.reducedMotion,
+      // The field thins as the cloud is spent, and is still once it is: completion looks like
+      // stillness. Square-rooted so the thinning is visible before the very end.
+      density: rates.complete ? 0 : Math.sqrt(rates.remaining),
+      present: state.cloud !== null,
     });
+  }
+
+  /** The stars you have made, as the renderer draws them. */
+  function skyStars(): SkyStar[] {
+    return state.sky.map((star) => {
+      const index = safeStageIndex(star.stage);
+      const stage = stageAt(index);
+      return {
+        id: star.id,
+        x: star.x,
+        y: star.y,
+        colour: stage.look.core,
+        heat: Math.max(0, STAGES.filter((st) => st.spectral).findIndex((st) => st.id === stage.id)),
+      };
+    });
+  }
+
+  /** Everything about the field that is not a rate: the sky and the cloud. */
+  function refreshScene(): void {
+    if (!field) return;
+    field.setSky(skyStars());
+    field.setCloud(state.cloud ? { seed: state.cloud.seed, hue: state.cloud.hue } : null);
   }
 
   // ---------------------------------------------------------------- the loop
@@ -946,7 +991,8 @@ function createGame() {
     refreshView();
 
     try {
-      field = await createField(fieldParent, { onPulse: () => actions.stir() });
+      field = await createField(fieldParent, {});
+      refreshScene();
       refreshField();
     } catch (error) {
       // No WebGL, or a context that refused to start. The game is entirely playable without
@@ -990,11 +1036,6 @@ function createGame() {
       }
     },
 
-    /** Touching the field stirs it. It pays nothing, so there is no best rhythm to do it in. */
-    stir(): void {
-      field?.pulse();
-    },
-
     toggleAutoBuy(id: UpgradeId): void {
       if (!isOpen(state, id)) return;
       state.autoBuy[id] = !state.autoBuy[id];
@@ -1017,13 +1058,22 @@ function createGame() {
     release(): void {
       const done = release(state, Date.now());
       if (!done) return;
-      releasingUntil = state.playTime + SUPERNOVA_SECONDS;
+      releasingUntil = state.playTime + RELEASE_SECONDS;
+      // The record is in the sky before the light that carries it there sets off, so the
+      // field knows where it is going; the field keeps it dark until it arrives.
+      refreshScene();
+      field?.release({
+        fate: done.fate,
+        colour: stageAt(safeStageIndex(done.star.stage)).look.core,
+        starId: done.star.id,
+      });
       const paid = done.stardust + done.discovery;
-      announce(
-        'Into your sky',
-        done.star.name,
-        `${stageAt(safeStageIndex(done.star.stage)).name}. It leaves ${FATE_WORDS[done.fate]}. ${formatStardust(paid)} stardust${done.discovery ? ', for a discovery among it' : ''}.`,
-      );
+      // Ahead of anything already waiting: this is the line the moment is about.
+      announcements.unshift({
+        eyebrow: 'Into your sky',
+        title: done.star.name,
+        body: `${stageAt(safeStageIndex(done.star.stage)).name}. It leaves ${FATE_WORDS[done.fate]}. ${formatStardust(paid)} stardust${done.discovery ? ', for a discovery among it' : ''}.`,
+      });
       showNextAnnouncement();
       save();
       refreshView();
@@ -1033,6 +1083,7 @@ function createGame() {
     /** Begin the next star from one of the clouds on offer. */
     chooseCloud(index: number): void {
       if (!chooseCloud(state, index)) return;
+      refreshScene();
       save();
       refreshView();
       refreshField();
@@ -1081,6 +1132,7 @@ function createGame() {
         applyOffline(state);
         save();
         refreshView();
+        refreshScene();
         refreshField();
         flash('Save imported.');
         return true;
@@ -1098,6 +1150,7 @@ function createGame() {
       accumulator = 0;
       save();
       refreshView();
+      refreshScene();
       refreshField();
       flash('Everything reset.');
     },

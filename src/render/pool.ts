@@ -274,6 +274,23 @@ export class ParticlePool {
   }
 
   /** Give every live particle a hard shove inward. The visible half of a Gravity Pulse. */
+  /**
+   * A hand through water: everything near the point is swirled round it and eased away. Plane
+   * coordinates, not screen ones — the caller undoes the tilt.
+   */
+  stir(x: number, y: number, radius: number, strength: number): void {
+    for (let i = 0; i < this.capacity; i++) {
+      if (this.active[i] === 0) continue;
+      const dx = (this.x[i] as number) - x;
+      const dy = (this.y[i] as number) - y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d >= radius || d < 1e-3) continue;
+      const f = (1 - d / radius) * (1 - d / radius) * strength;
+      this.vx[i] = (this.vx[i] as number) + ((-dy / d) * 0.8 + (dx / d) * 0.5) * f;
+      this.vy[i] = (this.vy[i] as number) + ((dx / d) * 0.8 + (dy / d) * 0.5) * f;
+    }
+  }
+
   kick(geo: FieldGeometry, strength: number): void {
     for (let i = 0; i < this.capacity; i++) {
       if (this.active[i] === 0) continue;

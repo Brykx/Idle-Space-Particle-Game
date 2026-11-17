@@ -5,12 +5,18 @@ import {
   Particle,
   ParticleContainer,
   Sprite,
-  type Texture,
+  Texture,
 } from 'pixi.js';
 import { createBodies, type Bodies, type BodyState } from './impostor';
 import { DEFAULT_TUNING, ParticlePool, type FieldGeometry } from './pool';
 import { LUMINOUS, makeSceneTextures } from './textures';
+import { createSky, type SkyStar } from './sky';
+import { createRelease, type ReleaseSpec } from './release';
+import { hueColour, makeNebula, makeShell } from './nebula';
 import type { BodyKind, GrainKind } from '../sim/stages';
+
+export type { SkyStar } from './sky';
+export type { ReleaseSpec } from './release';
 
 /**
  * The particle field — the only file in the project that imports Pixi.
@@ -52,12 +58,24 @@ export interface FieldRates {
   /** Maximum live particles. */
   budget: number;
   reducedMotion: boolean;
+  /**
+   * 0..1, how much of the cloud is left to fall in, as the eye should see it. Multiplies
+   * emission after every floor and ceiling, so a finished star really does sit in a cleared
+   * field, and between stars nothing falls at all.
+   */
+  density: number;
+  /** Whether there is a body at the centre at all. Between stars there is not. */
+  present: boolean;
 }
 
 export interface FieldHandle {
   setRates(rates: FieldRates): void;
-  /** Play the visible half of a Gravity Pulse. */
-  pulse(): void;
+  /** The stars you have made, in the sky behind everything. */
+  setSky(stars: SkyStar[]): void;
+  /** The cloud this run condenses from, drawn as a nebula that thins as it is spent. */
+  setCloud(cloud: { seed: number; hue: number } | null): void;
+  /** Let a star go: its shell or its supernova, and its light rising to its place. */
+  release(spec: ReleaseSpec): void;
   destroy(): void;
 }
 
@@ -67,9 +85,13 @@ const CORE_MAX_RADIUS = 64;
 const MAX_VISUAL_SPAWN = 260;
 /**
  * Floor on emission. The field is cosmetic, and an empty screen in the opening minute reads
- * as broken rather than as sparse — so it always drifts, even when income is a trickle.
+ * as broken rather than as sparse — so it always drifts, even when income is a trickle. The
+ * one thing allowed under the floor is the cloud running out, through `density`.
  */
 const MIN_VISUAL_SPAWN = 22;
+
+/** Where the light comes from on every rock sprite: the upper left, as on every body. */
+const SPRITE_LIGHT_ANGLE = Math.atan2(-0.58, -0.52);
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -110,28 +132,19 @@ function mixColour(a: number, b: number, t: number): number {
   );
 }
 
-/**
- * The sky is generated, not authored, but it should not reshuffle itself every time the
- * window is resized — a night sky that changes when you drag the corner of the browser stops
- * being a place. One seeded sequence, restarted on every rebuild.
- */
-function starRandom(): () => number {
-  let seed = 0x9e3779b9;
-  return () => {
-    seed = (seed * 1664525 + 1013904223) >>> 0;
-    return seed / 4294967296;
-  };
-}
-
 /** What the field looks like before the first `setRates` arrives — the dust stage. */
 const INITIAL_CORE = 0x8892a6;
 const INITIAL_PARTICLE = 0x9fc6ff;
 
 /**
  * How fast the core morphs when the stage changes, in e-folds per second. Slow enough that
- * becoming a planet is something you watch happen rather than a palette swap.
+ * becoming a planet is something you watch happen over several seconds — a promotion is a
+ * moment, and moments are slow — rather than a palette swap.
  */
-const MORPH_RATE = 1.2;
+const MORPH_RATE = 0.5;
+
+/** How fast one body dissolves into the next, per second. Four seconds for a promotion. */
+const BODY_BLEND_RATE = 0.25;
 
 /**
  * Trails.
@@ -149,8 +162,8 @@ const TRAIL_SPEED_REF = 190;
 const TRAIL_MAX_STRETCH = 5;
 
 export interface FieldOptions {
-  /** Called when the player clicks the field. */
-  onPulse: () => void;
+  /** Called when the player touches the field. It pays nothing; it is a toy. */
+  onStir?: () => void;
 }
 
 export async function createField(parent: HTMLElement, options: FieldOptions): Promise<FieldHandle> {
@@ -173,8 +186,16 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   const glow = textures.glow;
 
   // --- scene graph -------------------------------------------------------------------
-  const stars = new ParticleContainer({ dynamicProperties: {} });
-  stars.blendMode = 'add';
+  const sky = createSky({ star: textures.particles.star, glow });
+  const release = createRelease({ glow, star: textures.particles.star, shell: makeShell() });
+
+  /** The cloud this run condenses from. Behind the field, in front of the sky. */
+  const nebula = new Sprite(Texture.WHITE);
+  nebula.anchor.set(0.5);
+  nebula.blendMode = 'add';
+  nebula.alpha = 0;
+  let nebulaSeed = -1;
+  let nebulaTarget = 0;
 
   const field = new ParticleContainer({
     // `scale` is not one of these — size and anchor are baked into `vertex`, so per-frame
@@ -242,9 +263,9 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   const occluder = new Graphics();
   occluder.circle(0, 0, 1).fill(0x000000);
 
-  app.stage.addChild(stars, field, halo, corePrevious, core, occluder);
+  app.stage.addChild(sky.view, nebula, field, halo, corePrevious, core, occluder);
   if (bodies) app.stage.addChild(bodies.view);
-  app.stage.addChild(fieldFront, effects);
+  app.stage.addChild(release.view, fieldFront, effects);
 
   // --- state -------------------------------------------------------------------------
   const tuning = { ...DEFAULT_TUNING };
@@ -268,7 +289,12 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     body: 'mote',
     budget: 1200,
     reducedMotion: false,
+    density: 1,
+    present: true,
   };
+
+  /** 0..1, how much of a body there is at the centre. Eases, so a star leaves gradually. */
+  let presence = 1;
 
   // What is actually drawn, chasing `rates`. Kept separate so a stage change is a morph.
   const shown = {
@@ -323,6 +349,9 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   let flash = 0;
   let time = 0;
 
+  /** The record a release is carrying to its place, while it is in flight. */
+  let releasingStar: number | null = null;
+
   const rings: Array<{ gfx: Graphics; life: number }> = [];
   for (let i = 0; i < 4; i++) {
     const gfx = new Graphics();
@@ -369,80 +398,6 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     fieldFront.update();
   }
 
-  /**
-   * The night sky.
-   *
-   * It used to be 260 identical dots at one colour and one brightness, which reads as noise
-   * on the lens rather than as a sky. Three things make the difference, and none of them is
-   * more dots:
-   *
-   * **Brightness is a power law.** Real magnitudes go roughly one to two-and-a-half in count
-   * per step down in brightness, so a sky is thousands of near-invisible stars with a few
-   * dozen obvious ones standing out of them. A uniform distribution has no standouts, so the
-   * eye finds no structure and the whole thing reads flat.
-   *
-   * **Colour is temperature.** Stars run blue-white through white and yellow to orange, and
-   * the cool ones are far more common than the hot ones. A single tint is what made the old
-   * field look like dust on a scanner.
-   *
-   * **There is a band.** The galaxy is a disc and we are inside it, so half the sky has
-   * noticeably more stars than the other half, along a line. Tilting that band across the
-   * frame gives the sky an axis, which is the thing that stops it looking like static.
-   *
-   * All of it is static after build: one container, no per-frame work, one draw call.
-   */
-  function rebuildStars(): void {
-    const { width, height } = app.screen;
-    stars.particleChildren.length = 0;
-
-    const count = rates.reducedMotion ? 900 : 1800;
-    const random = starRandom();
-
-    // The galactic band: a line across the frame that stars cluster towards.
-    const bandAngle = -0.42;
-    const bandCos = Math.cos(bandAngle);
-    const bandSin = Math.sin(bandAngle);
-    const bandWidth = Math.min(width, height) * 0.32;
-
-    for (let i = 0; i < count; i++) {
-      // A third of the sky is drawn from the band, the rest is scattered evenly.
-      const inBand = random() < 0.34;
-      let x = random() * width;
-      let y = random() * height;
-      if (inBand) {
-        const along = (random() - 0.5) * Math.hypot(width, height);
-        // Two samples averaged: a rough bell, so the band has a dense core and soft edges.
-        const across = ((random() + random()) - 1) * bandWidth;
-        x = width / 2 + bandCos * along - bandSin * across;
-        y = height / 2 + bandSin * along + bandCos * across;
-        if (x < 0 || x > width || y < 0 || y > height) continue;
-      }
-
-      // Magnitude: a steep power law, so most are barely there and a few carry the sky.
-      const magnitude = Math.pow(random(), 3.4);
-      const alpha = 0.05 + magnitude * 0.95;
-
-      // Temperature, weighted towards the cool end the way a real population is.
-      const heat = Math.pow(random(), 1.8);
-      const tint = mixColour(0xffd2a1, 0xcfe0ff, heat);
-
-      const p = new Particle({
-        texture: textures.particles.star,
-        x,
-        y,
-        anchorX: 0.5,
-        anchorY: 0.5,
-        alpha,
-      });
-      // The bright ones are bigger, but only a little: a star is a point, and a big soft one
-      // reads as a smudge. The spikes in the texture do the work of making it look bright.
-      p.scaleX = p.scaleY = 0.012 + magnitude * 0.05;
-      p.tint = tint;
-      stars.addParticle(p);
-    }
-    stars.update();
-  }
-
   function layout(): void {
     const { width, height } = app.screen;
     geo.centreX = width / 2;
@@ -452,6 +407,10 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     // Just past the corner: far enough that a full-width field never pops into view, close
     // enough that it does not spend its budget on particles nobody can see.
     geo.viewRadius = Math.max(220, (Math.hypot(width, height) / 2) * 1.04);
+    sky.layout(width, height, rates.reducedMotion);
+    nebula.position.set(geo.centreX, geo.centreY);
+    // The texture is 256 pixels across; the cloud should overfill the screen.
+    nebula.scale.set((Math.hypot(width, height) * 1.15) / 256);
     halo.position.set(geo.centreX, geo.centreY);
     core.position.set(geo.centreX, geo.centreY);
     corePrevious.position.set(geo.centreX, geo.centreY);
@@ -461,20 +420,38 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
 
   rebuildPool(rates.budget);
   layout();
-  rebuildStars();
 
-  const resizeObserver = new ResizeObserver(() => {
-    layout();
-    rebuildStars();
-  });
+  const resizeObserver = new ResizeObserver(() => layout());
   resizeObserver.observe(parent);
 
   // --- interaction -------------------------------------------------------------------
+  //
+  // Touching the field stirs it: a ripple where you touched, and a tug on whatever is near.
+  // It pays nothing, so there is no best rhythm to do it in. It is a toy.
   app.stage.eventMode = 'static';
   app.stage.hitArea = app.screen;
-  app.stage.cursor = 'pointer';
-  const onTap = (): void => options.onPulse();
+  const onTap = (event: { global: { x: number; y: number } }): void => {
+    stir(event.global.x, event.global.y);
+    options.onStir?.();
+  };
   app.stage.on('pointertap', onTap);
+
+  function stir(x: number, y: number): void {
+    const squash = 1 - shown.tilt * 0.72;
+    // The pool lives in the orbital plane; the screen is that plane squashed.
+    const planeY = geo.centreY + (y - geo.centreY) / Math.max(0.2, squash);
+    const reach = Math.min(app.screen.width, app.screen.height) * 0.22;
+    pool.stir(x, planeY, reach, rates.reducedMotion ? 40 : 140);
+
+    if (rates.reducedMotion) return;
+    const ring = rings.find((r) => r.life <= 0);
+    if (!ring) return;
+    ring.gfx.clear();
+    ring.gfx.circle(0, 0, 40).stroke({ width: 1.5, color: pack(shown.particle), alpha: 1 });
+    ring.gfx.position.set(x, y);
+    ring.gfx.visible = true;
+    ring.life = 1;
+  }
 
   /**
    * Move a particle into the front layer if it is crossing the body on the near side.
@@ -535,7 +512,15 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       Math.min(
         MAX_VISUAL_SPAWN,
         Math.max(MIN_VISUAL_SPAWN, rates.spawnRate) * shown.particleCount,
-      ) * (rates.reducedMotion ? 0.4 : 1);
+      ) *
+      (rates.reducedMotion ? 0.4 : 1) *
+      Math.max(0, Math.min(1, rates.density));
+
+    // The body comes and goes slowly: a star let go fades out from under its shell, and the
+    // next run's first speck of dust fades in.
+    presence += ((rates.present ? 1 : 0) - presence) * (1 - Math.exp(-0.8 * dt));
+    sky.frame(dt, rates.reducedMotion);
+    nebula.alpha += (nebulaTarget * Math.sqrt(Math.max(0, rates.density)) - nebula.alpha) * (1 - Math.exp(-0.4 * dt));
 
     // A trail is motion, so reduced motion takes it to nothing — one factor, not a branch.
     const trail = rates.reducedMotion ? 0 : 1;
@@ -567,6 +552,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     // face-on, which is the one stage of the field that was already right.
     const crossing = shown.tilt > 0.08 ? geo.coreRadius * 1.35 : 0;
     let frontUsed = 0;
+    const luminousCore = LUMINOUS.has(shownBody) && presence > 0.5;
 
     const n = pool.capacity;
     for (let i = 0; i < n; i++) {
@@ -598,8 +584,14 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
         // A rock does not smear. Stretching the sprite along its velocity is what a streak
         // *is*, and it works because a soft dot has no shape to distort — the moment the
         // sprite has a silhouette, the same trick turns every meteoroid into a lozenge.
-        // So lit bodies keep their outline and tumble instead, which is what they do.
-        sprite.rotation = i * 2.399 + time * (0.15 + (i % 7) * 0.04) * trail;
+        //
+        // Nor does it tumble, any more. The lighting is painted into the sprite, so a turning
+        // rock turned its sunlit side with it. Around a dark body every rock keeps the light
+        // where the body has it, upper left; around a star the star *is* the light, so each
+        // rock turns its lit side towards the core.
+        sprite.rotation = luminousCore
+          ? Math.atan2(geo.centreY - sprite.y, geo.centreX - sprite.x) - SPRITE_LIGHT_ANGLE
+          : 0;
         sprite.scaleX = s;
         sprite.scaleY = s;
         sprite.alpha = alpha;
@@ -650,7 +642,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       bodyBlend = 0;
     }
     // Slow: a promotion is something you watch happen, not a palette swap.
-    bodyBlend = Math.min(1, bodyBlend + dt * 0.55);
+    bodyBlend = Math.min(1, bodyBlend + dt * BODY_BLEND_RATE);
 
     if (rates.grain !== shownGrain) {
       shownGrain = rates.grain;
@@ -676,10 +668,10 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     // antialiased silhouette. A mote has no surface to hide behind, and a body mid-crossfade
     // is only half there, so the hole fades with it.
     const solid = shownBody !== 'mote';
-    occluder.visible = solid;
+    occluder.visible = solid && presence > 0.01;
     if (solid) {
       occluder.scale.set(coreScale * 120 * 0.96);
-      occluder.alpha = previousBody === 'mote' ? bodyBlend : 1;
+      occluder.alpha = (previousBody === 'mote' ? bodyBlend : 1) * presence;
     }
 
     if (bodies) {
@@ -696,10 +688,12 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       // Both sides of a promotion are on screen together while it happens, with the new one
       // in front so the old one dissolves out from under it.
       bodies.begin();
-      if (previousBody !== shownBody && bodyBlend < 1) {
-        bodies.show(previousBody, { ...body, alpha: 1 - bodyBlend }, 0);
+      if (presence > 0.01) {
+        if (previousBody !== shownBody && bodyBlend < 1) {
+          bodies.show(previousBody, { ...body, alpha: (1 - bodyBlend) * presence }, 0);
+        }
+        bodies.show(shownBody, { ...body, alpha: bodyBlend * presence }, 1);
       }
-      bodies.show(shownBody, { ...body, alpha: bodyBlend }, 1);
       bodies.end();
 
       core.alpha = 0;
@@ -713,8 +707,8 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       core.tint = luminous
         ? mixColour(coreTint, 0xffffff, 0.3 + flash * 0.4)
         : mixColour(coreTint, 0xffffff, flash * 0.35);
-      core.alpha = luminous ? 0.85 + flash * 0.15 : bodyBlend;
-      corePrevious.alpha = 1 - bodyBlend;
+      core.alpha = (luminous ? 0.85 + flash * 0.15 : bodyBlend) * presence;
+      corePrevious.alpha = (1 - bodyBlend) * presence;
     }
 
     // The halo is light, so it belongs to bodies that emit it. A rock gets a hint of dust.
@@ -722,8 +716,21 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     // bloom for them, and most of it would be a second glow on top of a better one.
     const bloom = bodies ? 0.4 : 1;
     halo.scale.set(coreScale * (luminous ? 1.7 : 1.1));
-    halo.alpha = (luminous ? 0.16 + flash * 0.2 + shown.scale * 0.12 : 0.05 + flash * 0.12) * bloom;
+    halo.alpha = (luminous ? 0.16 + flash * 0.2 + shown.scale * 0.12 : 0.05 + flash * 0.12) * bloom * presence;
     halo.tint = particleTint;
+
+    if (release.running) {
+      release.frame(
+        dt,
+        { x: geo.centreX, y: geo.centreY },
+        Math.min(app.screen.width, app.screen.height) / 2,
+        releasingStar === null ? null : sky.screenPositionOf(releasingStar),
+        () => {
+          sky.hold(null);
+          releasingStar = null;
+        },
+      );
+    }
 
     for (const ring of rings) {
       if (ring.life <= 0) continue;
@@ -750,22 +757,43 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       const motionChanged = next.reducedMotion !== rates.reducedMotion;
       rates = next;
       if (budgetChanged) rebuildPool(next.budget);
-      if (motionChanged) rebuildStars();
+      if (motionChanged) layout();
     },
 
-    pulse(): void {
-      pulseStrength = 9;
-      pool.kick(geo, 260);
-      flash = Math.min(1, flash + 0.5);
+    setSky(stars: SkyStar[]): void {
+      sky.setStars(stars);
+    },
 
-      if (rates.reducedMotion) return;
-      const ring = rings.find((r) => r.life <= 0);
-      if (!ring) return;
-      ring.gfx.clear();
-      ring.gfx.circle(0, 0, 90).stroke({ width: 3, color: pack(shown.particle), alpha: 1 });
-      ring.gfx.position.set(geo.centreX, geo.centreY);
-      ring.gfx.visible = true;
-      ring.life = 1;
+    setCloud(cloud: { seed: number; hue: number } | null): void {
+      if (!cloud) {
+        nebulaTarget = 0;
+        return;
+      }
+      if (cloud.seed !== nebulaSeed) {
+        nebulaSeed = cloud.seed;
+        const previous = nebula.texture;
+        nebula.texture = makeNebula(cloud.seed);
+        if (previous !== Texture.WHITE) previous.destroy(true);
+      }
+      nebula.tint = hueColour(cloud.hue);
+      // Faint on purpose: the cloud is the setting, not the subject.
+      nebulaTarget = 0.42;
+    },
+
+    release(spec: ReleaseSpec): void {
+      if (rates.reducedMotion) {
+        sky.hold(null);
+        return;
+      }
+      releasingStar = spec.starId;
+      sky.hold(spec.starId);
+      release.start(spec, geo.coreRadius);
+      // A supernova does not fade: the star is gone under the flash, all at once.
+      if (spec.fate === 'supernova') presence = 0;
+      // What the star threw off pushes the field outwards: gently for a shell of gas, hard for
+      // a supernova. The particles already falling are the last of the cloud.
+      pool.kick(geo, spec.fate === 'supernova' ? -360 : spec.fate === 'nebula' ? -90 : 0);
+      pulseStrength = 1;
     },
 
     destroy(): void {

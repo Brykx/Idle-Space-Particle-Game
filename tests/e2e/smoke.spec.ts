@@ -380,6 +380,11 @@ test.describe('the game runs', () => {
     // is wrong in the worst possible way, so it is driven end to end rather than unit-tested
     // and hoped for: arm, confirm, choose, and then a fresh page to prove it was written down.
     //
+    // The release is drawn by code that runs at no other time, so anything it throws is
+    // collected and asserted on at the end rather than lost in the console.
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(String(error)));
+
     // Heavier than the first cloud holds, which the save migration turns into a finished Sun.
     await seedSave(page, {
       mass: '9e21',
@@ -434,6 +439,36 @@ test.describe('the game runs', () => {
     await expect(returning.getByTestId('current')).toContainText(chosen);
     await expect(returning.getByTestId('catalogue')).toContainText('Morning');
     await returning.close();
+
+    expect(errors, 'nothing thrown while the star was let go').toEqual([]);
+  });
+
+  test('is an empty field between stars', async ({ page }) => {
+    // The same heavy core twice, once with a cloud and once without. Comparing the two
+    // isolates the one property under test — no cloud, no body — from everything else that
+    // lights the middle of the screen, which is not nothing: the page's own gradient and the
+    // band of the sky both run brighter there than in a corner.
+    const centreWith = async (cloud: unknown) => {
+      await seedSave(page, {
+        version: 5,
+        mass: '1e9',
+        totalMassEver: '1e9',
+        cloud,
+        settings: { particleBudget: 0, reducedMotion: true },
+      });
+      await page.reload();
+      await page.waitForTimeout(2500);
+      const box = (await page.locator('canvas').boundingBox()) as Box;
+      return luminance(page, { x: box.x + box.width / 2 - 30, y: box.y + box.height / 2 - 30, width: 60, height: 60 });
+    };
+
+    const planet = await centreWith({ seed: 1, name: 'Morning Veil', ceiling: 'yellowDwarf', pace: 1, trait: 'quiet', hue: 214 });
+    await expect(page.locator('.stage-name')).toHaveText('Planet');
+
+    const between = await centreWith(null);
+    await expect(page.locator('.stage-name')).toHaveText('Between stars');
+
+    expect(planet.mean).toBeGreaterThan(between.mean + 10);
   });
 
   // Every body kind the ladder can reach by mass. The last two, the neutron star and the
