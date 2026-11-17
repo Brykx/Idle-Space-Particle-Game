@@ -52,9 +52,11 @@ never be scolded. Concretely:
   about eight per run on the first run and none at all on later ones — and from then on it
   grows by itself. A current can be *held* if you would rather tend it by hand.
 - **Automation is value-aware.** It buys whatever pays itself back soonest and leaves alone
-  anything that would not within the hour, so a saturated card *settles* instead of eating
-  the run. The default behaviour is now the sensible one, which is the precondition for it
-  being the default at all.
+  anything that would not soon enough, so a saturated card *settles* instead of eating the
+  run. "Soon enough" is measured in the run's own time — a dozen tenfolds of its present
+  growth, which is about an hour in the first run and much longer in a vast, slow cloud. The
+  default behaviour is now the sensible one, which is the precondition for it being the
+  default at all.
 - **An absence is just time.** The horizon is thirty days with an adaptive step, the report
   says what happened rather than what was forfeited, and the cap achievement is gone.
 - **The interface recedes.** One quiet caption; the rest behind a sheet you summon. It dims
@@ -88,12 +90,15 @@ Every run condenses from a **cloud**, and a cloud is finite:
 | Property | What it does |
 |---|---|
 | **ceiling** | The largest class of star this cloud can make. Its mass budget is where that class ends. |
-| **pace** | Small clouds are dense and quick; vast ones are thin and slow. A flat multiplier. |
+| **pace** | Small clouds are dense and quick; vast ones are thin and slow. A flat multiplier: M x1.6, K x1.25, G x1, F x0.5, A x0.22, B x0.12, O x0.065, each cloud within 12% of its class. |
 | **trait** | *quiet*, *icy*, *ferrous* or *turning*. Changes what the infall looks like and shifts the shape of the run a little. Near-equal by design: there is no wrong one. |
 | **hue** | The colour of the nebula behind the run. |
 
 The first cloud is fixed and can make a Sun. After each star you are offered three, drawn
 from a seed — no rerolls, nothing to gamble on — and the run does not begin until you choose.
+One of them is always as large as you can currently reach, so the summit you are working
+towards is never withheld by a roll. Each comes with a rough forecast — *within the hour*,
+*overnight* — made by running the star on a copy, because a word still has to be true.
 **Between stars the field is empty.** That pause is deliberate; it is the one moment the game
 has nothing happening in it.
 
@@ -149,18 +154,25 @@ catalogue. That is a decision about what you want in your sky, not about efficie
 
 Stardust buys a small, **bounded** tree. Every card ends.
 
-| Card | Levels | Does |
-|---|---|---|
-| **Reach** | 4 | Larger clouds can be found: F, then A, B, O |
-| **Enrichment** | 10 | x1.25 to all mass |
-| **Prior Ignition** | 4 | Begin one element further up the chain |
-| **Wider Gaze** | 2 | A fourth and a fifth cloud to choose between |
+| Card | Levels | Does | Costs |
+|---|---|---|---|
+| **Reach** | 4 | Larger clouds can be found: F, then A, B, O | 150, 400, 1,000, 2,500 |
+| **Enrichment** | 8 | x1.15 to all mass | 6 rising to 250 |
+| **Prior Ignition** | 4 | Begin one element further up the chain | 20, 80, 250, 700 |
+| **Wider Gaze** | 2 | A fourth and a fifth cloud to choose between | 40, 200 |
 
-And one thing that is not bought: **every star in your sky adds 2% to all mass**, up to
-fifty of them. The collection is the progression.
+The first star of each class pays a discovery bonus on top: 5, 20, 45, 80, 125, 180 and 245
+from M to O. And one thing that is not bought: **every star in your sky adds 2% to all
+mass**, up to fifty of them. The collection is the progression.
 
 Bounded matters. Total permanent speed-up is finite, so a run never collapses into seconds,
 and the summit — a blue supergiant in your own sky — stays a long way up.
+
+The first draft of this tree had ten levels of x1.25 and costs a third of these, and the
+career simulation finished it in six days, with a blue supergiant on day six and late Suns
+taking minutes. That is the failure this section exists to prevent, arrived at by the
+numbers rather than by intent, so the tree was weakened, repriced and the pace ladder
+steepened until the measurements below came out.
 
 ### 3.5 What was removed, and why it is not coming back
 
@@ -212,4 +224,34 @@ and this is that sentence taken literally.
 
 ## 6. Measured
 
-*Filled in from `npm run balance` once the build is calibrated.*
+From `npm run balance`. The career is simulated star by star — choose a cloud, let the star
+finish, let it go, spend the Stardust cheapest-first — and placed on a calendar of someone
+who looks in at 8:00, 12:30, 18:00 and 22:00 and not overnight. A star that finishes at three
+in the morning is let go at eight.
+
+**The first star.** Pebble at 1:09, Red Dwarf at 1:07, a Sun at 1:29, and the cloud spent
+at 1:59 — the last half hour is the star easing to a finish as the field thins. Income
+doubles every 98 seconds through the first hour. The eight currents arrive to be opened at
+9 s, 53 s, 1:23, 4:01, 10:09, 35:00, 39:40 and 41:20.
+
+**The four kinds of cloud**, the same Sun from each: within 4% of each other.
+
+**A career, choosing the largest cloud every time:**
+
+| | Day | A star of the frontier class takes |
+|---|---|---|
+| First Sun (G) | 0.5 | 1:59, then 25–50 min |
+| First white star (F) | 3.3 | about an hour, falling to 35 min |
+| First blue-white (A) | 7.3 | 1:40, falling to 1:20 |
+| First blue giant (B) | 10.8 | 3:25, falling to 2:55 |
+| First blue supergiant (O) | 14.5 | 10:20, settling near 8:40 |
+| Tree complete | 13.9 | |
+
+Someone looking in twice a day takes roughly twice as long. Choosing the smallest cloud
+every time instead fills the sky with red dwarfs at a quarter of an hour each, and never
+reaches past them — the two policies bracket every real player.
+
+**At the end of everything** — every card full, fifty stars, every achievement — a blue
+supergiant still takes over four hours and a red dwarf about two minutes. The red dwarf is
+quick on purpose: by then it pays nothing the tree still wants and the sky's bonus is full,
+so speed there rewards no one for hovering. It is still the whole ladder, from dust.

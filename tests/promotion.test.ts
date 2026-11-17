@@ -83,13 +83,15 @@ describe('rebased upgrades', () => {
     expect(s.levels.density).toBe(0);
   });
 
-  it('keeps the investment, so a promotion never takes an auto-buyer away', () => {
+  it('keeps the investment, so a promotion never closes a current', () => {
     const s = atStage(1);
     s.mass = D('1e6');
     const bought = buy(s, 'density', 'max');
     expect(bought, 'the fixture has to actually buy something').toBeGreaterThan(5);
     expect(s.levels.density).toBe(bought);
 
+    // Held, so the automation does not rebuy the card in the same tick and hide the reset.
+    s.autoBuy.density = false;
     s.totalMassEver = ACCRETION_STAGES[3]!.threshold!;
     tick(s, 1);
     expect(s.levels.density, 'the levels go').toBe(0);

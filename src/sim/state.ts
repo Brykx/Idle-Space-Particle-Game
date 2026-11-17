@@ -1,8 +1,9 @@
 import { D, type Notation, type Num } from './numbers';
 import { UPGRADE_IDS, type UpgradeId } from './upgrades';
-import { STARDUST_IDS, type StardustId } from './prestige';
+import { STARDUST_IDS, type StardustId, type StarRecord } from './sky';
+import { firstCloud, mix, type Cloud } from './clouds';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 export interface Settings {
   notation: Notation;
@@ -66,13 +67,27 @@ export interface GameState {
   /** Ids of unlocked achievements. Survive a collapse; they record what you did. */
   achievements: string[];
 
-  // --- what survives a supernova -------------------------------------------------------
-  /** Unspent Stardust. A Decimal: it goes as mass^0.6, and mass has no ceiling. */
-  stardust: Num;
+  // --- the run --------------------------------------------------------------------------
+  /**
+   * The cloud this star is condensing from, or null between stars while the next is chosen.
+   * Null is a real state, not a missing value: it is the one moment the field is empty.
+   */
+  cloud: Cloud | null;
+  /** `playTime` when this star's cloud was chosen. */
+  runStartedAt: number;
+
+  // --- what a star leaves --------------------------------------------------------------
+  /** Seeds every draw this save makes — clouds, names, places in the sky — so none rerolls. */
+  skySeed: number;
+  /** Every star you have let go, in the order you made them. */
+  sky: StarRecord[];
+  /**
+   * Unspent Stardust. A plain number: it is paid in orders of magnitude, bounded by the
+   * cloud, so a lifetime of it fits comfortably in a double.
+   */
+  stardust: number;
   /** Ever earned. Drives achievements and the "how far have you come" readouts. */
-  stardustEver: Num;
-  /** How many supernovae you have set off. */
-  collapses: number;
+  stardustEver: number;
   stardustLevels: Record<StardustId, number>;
   /** Wall-clock ms at the last save. The one bridge to real time, used for offline catch-up. */
   lastSeen: number;
@@ -106,13 +121,18 @@ export function initialState(now = Date.now()): GameState {
     rebasedStage: 0,
     autoBuy,
     achievements: [],
-    stardust: D(0),
-    stardustEver: D(0),
-    collapses: 0,
+    cloud: firstCloud(),
+    runStartedAt: 0,
+    // From the creation time, so a fresh save is reproducible in tests and different for
+    // every player in practice.
+    skySeed: mix(now % 0x1_0000_0000, Math.floor(now / 0x1_0000_0000)),
+    sky: [],
+    stardust: 0,
+    stardustEver: 0,
     stardustLevels,
     lastSeen: now,
     settings: {
-      notation: 'letters',
+      notation: 'words',
       particleBudget: 1200,
       reducedMotion: false,
       autoBuyReserve: 0,
@@ -138,8 +158,8 @@ export function cloneState(s: GameState): GameState {
     levelsEver: { ...s.levelsEver },
     autoBuy: { ...s.autoBuy },
     achievements: [...s.achievements],
-    stardust: D(s.stardust),
-    stardustEver: D(s.stardustEver),
+    cloud: s.cloud ? { ...s.cloud } : null,
+    sky: s.sky.map((star) => ({ ...star })),
     stardustLevels: { ...s.stardustLevels },
     settings: { ...s.settings },
     stats: { ...s.stats },

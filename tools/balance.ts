@@ -1,14 +1,17 @@
-import { D, format, formatDuration, type Num } from '../src/sim/numbers';
-import { buy, canAfford, deriveRates, isOpen, tick, unlockedUpgrades } from '../src/sim/economy';
+import { format, formatDuration } from '../src/sim/numbers';
+import { buy, canAfford, deriveRates, isOpen, isRunning, tick, unlockedUpgrades } from '../src/sim/economy';
 import { initialState, type GameState } from '../src/sim/state';
-import { ACCRETION_STAGES } from '../src/sim/stages';
+import { ACCRETION_STAGES, classIndexOf, stageAt, stageIndexById } from '../src/sim/stages';
 import {
   STARDUST_LIST,
   buyStardust,
-  collapse,
+  chooseCloud,
+  offersFor,
+  release,
   stardustCost,
-  stardustFor,
-} from '../src/sim/prestige';
+  type StardustId,
+} from '../src/sim/sky';
+import { TRAITS, ceilingClassOf, ceilingStageOf, type Cloud, type Trait } from '../src/sim/clouds';
 import { REACHABLE_ELEMENTS } from '../src/sim/elements';
 
 /**
@@ -22,9 +25,20 @@ import { REACHABLE_ELEMENTS } from '../src/sim/elements';
 /**
  * The stage ladder is the milestone list — one source of truth, so a threshold moved in
  * `sim/stages.ts` shows up here without anything else changing. Dust is skipped: it is where
- * you start.
+ * you start. A run reaches as far as its cloud allows and then finishes, so the list is cut
+ * at the cloud's ceiling and ends with the cloud being spent.
  */
-const MILESTONES = ACCRETION_STAGES.slice(1);
+function milestonesFor(s: GameState): Array<{ id: string; name: string; reached: (s: GameState) => boolean }> {
+  const top = s.cloud ? ceilingStageOf(s.cloud) : 0;
+  return [
+    ...ACCRETION_STAGES.slice(1, top + 1).map((stage) => ({
+      id: stage.id,
+      name: stage.name,
+      reached: (state: GameState) => stage.threshold !== null && state.totalMassEver.gte(stage.threshold),
+    })),
+    { id: 'spent', name: 'Cloud spent', reached: (state: GameState) => !isRunning(state) },
+  ];
+}
 
 export interface PacingResult {
   id: string;
@@ -109,6 +123,7 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
   const { limitSeconds = 24 * 3600, step = 0.1, from } = options;
 
   const s = from ?? initialState(0);
+  const MILESTONES = milestonesFor(s);
   const results: PacingResult[] = [];
   let next = 0;
 
@@ -126,9 +141,7 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
   const startedAt = s.playTime;
   const purchasesAtStart = s.stats.purchases;
   let purchasesInFirstHour: number | null = null;
-  while (next < MILESTONES.length && MILESTONES[next] && s.totalMassEver.gte(MILESTONES[next]!.threshold ?? D(Infinity))) {
-    next += 1;
-  }
+  while (next < MILESTONES.length && MILESTONES[next]?.reached(s)) next += 1;
 
   while (s.playTime - startedAt < limitSeconds && next < MILESTONES.length) {
     tick(s, step);
@@ -160,8 +173,8 @@ export function runPacing(options: PacingOptions = {}): PacingRun {
       sampleAt = elapsed + 10;
     }
 
-    const milestone = MILESTONES[next];
-    if (milestone?.threshold && s.totalMassEver.gte(milestone.threshold)) {
+    // A coarse step can cross more than one at once.
+    for (let milestone = MILESTONES[next]; milestone?.reached(s); milestone = MILESTONES[next]) {
       results.push({
         id: milestone.id,
         label: milestone.name,
@@ -207,66 +220,174 @@ function doublingTime(incomeLog: Array<[number, number]>, windowSeconds: number)
   return first && last && last[1] > first[1] ? (last[0] - first[0]) / (last[1] - first[1]) : Infinity;
 }
 
+// --------------------------------------------------------------------------------- careers
+
 /**
- * Play run one to the top, collapse, spend the Stardust, and play run two.
+ * How a player chooses between clouds. The two ends of a range, so the tuning is checked
+ * against both rather than against one imagined player.
  *
- * The only claim Phase 3 makes that can be checked by measuring rather than by feel is that
- * the second run is meaningfully faster than the first. Everything else about a prestige
- * layer — whether the tree is interesting, whether the decision of when to collapse is a
- * real one — needs a person. This does not answer those. It answers whether the numbers move.
- *
- * Stardust is spent cheapest-first, which is what clearing a five-card tree looks like.
+ * - `largest`: always the biggest cloud on offer. The summit-chaser, and the slowest sky.
+ * - `smallest`: always the smallest. Fills the sky quickest and earns the least per star.
  */
-export interface CollapseRun {
-  firstRun: PacingRun;
-  secondRun: PacingRun;
-  /** Seconds played past the top of the ladder before collapsing. */
-  pushSeconds: number;
-  stardust: Num;
-  spent: Array<{ name: string; level: number }>;
+export type CloudPolicy = 'largest' | 'smallest';
+
+/**
+ * When a player looks in. A star that finishes between visits waits for the next one, and
+ * that wait is part of how long a career takes in days.
+ *
+ * Hours of the day, starting from midnight. The default is someone who looks in a few times
+ * in a day and not at all overnight.
+ */
+export const DEFAULT_CHECK_INS = [8, 12.5, 18, 22] as const;
+
+export interface CareerStar {
+  index: number;
+  cloud: Cloud;
+  /** Seconds the run took, from choosing the cloud to the cloud being spent. */
+  seconds: number;
+  /** The class it was let go as. */
+  name: string;
+  stardust: number;
+  discovery: number;
+  /** Days since the career began, when it was let go. */
+  day: number;
+  /** The tree after this star's Stardust was spent. */
+  tree: Record<StardustId, number>;
+}
+
+export interface Career {
+  stars: CareerStar[];
+  /** Day each class was first let go, M first. Infinity if never. */
+  firstOfClass: number[];
+  /** Day every card of the tree was full, or Infinity. */
+  treeFull: number;
+}
+
+export interface CareerOptions {
+  stars?: number;
+  policy?: CloudPolicy;
+  checkIns?: readonly number[];
+  /** Simulation step for the runs, in seconds. Coarser is faster and pays slightly less. */
+  step?: number;
 }
 
 /**
- * `pushSeconds` is the whole decision the prestige layer is built around, so it is a
- * parameter rather than a constant.
+ * Spend what the tree will take, cheapest first.
  *
- * Collapsing the instant the ladder tops out is the worst available moment and nobody plays
- * that way, but it is what a bot does unless told otherwise — and reporting it as though it
- * were the answer would make the tree look far weaker than it is. The yield goes as mass to
- * the 0.6, and mass is exponential in time, so twenty more minutes is not twenty percent more
- * Stardust. Measuring two or three push times is the only way to see that.
+ * With four short cards that is what clearing it looks like, and it is close to what a
+ * person would do: the cheap levels of Enrichment early, Reach when it comes in range.
  */
-export function runCollapse(pushSeconds = 0): CollapseRun {
-  const first = runPacing();
-  const s = first.state;
-
-  // Keep playing past the top before pulling the trigger.
-  for (let t = 0; t < pushSeconds; t += 0.1) {
-    tick(s, 0.1);
-    openWhatCanBeOpened(s);
-  }
-
-  const stardust = stardustFor(s);
-  collapse(s);
-
+function spendStardust(s: GameState): void {
   for (;;) {
     const options = STARDUST_LIST.map((def) => ({ def, cost: stardustCost(def, s.stardustLevels[def.id]) }))
-      .filter((o) => o.def.maxLevel > s.stardustLevels[o.def.id] && o.cost.lte(s.stardust))
-      .sort((a, b) => (a.cost.lt(b.cost) ? -1 : 1));
+      .filter((o): o is { def: (typeof STARDUST_LIST)[number]; cost: number } => o.cost !== null && o.cost <= s.stardust)
+      .sort((a, b) => a.cost - b.cost);
     const best = options[0];
     if (!best || !buyStardust(s, best.def.id)) break;
   }
+}
 
-  return {
-    firstRun: first,
-    secondRun: runPacing({ from: s }),
-    pushSeconds,
-    stardust,
-    spent: STARDUST_LIST.filter((def) => s.stardustLevels[def.id] > 0).map((def) => ({
-      name: def.name,
-      level: s.stardustLevels[def.id],
-    })),
-  };
+function chooseByPolicy(s: GameState, policy: CloudPolicy): void {
+  const offers = offersFor(s);
+  let pick = 0;
+  offers.forEach((cloud, index) => {
+    const here = ceilingClassOf(cloud);
+    const best = ceilingClassOf(offers[pick] as Cloud);
+    const better =
+      policy === 'largest'
+        ? here > best || (here === best && cloud.pace > (offers[pick] as Cloud).pace)
+        : here < best || (here === best && cloud.pace > (offers[pick] as Cloud).pace);
+    if (better) pick = index;
+  });
+  chooseCloud(s, pick);
+}
+
+/** The next check-in after `seconds` into the career. */
+function nextCheckIn(seconds: number, checkIns: readonly number[]): number {
+  const day = Math.floor(seconds / 86400);
+  for (let d = day; d < day + 3; d++) {
+    for (const hour of checkIns) {
+      const at = d * 86400 + hour * 3600;
+      if (at >= seconds) return at;
+    }
+  }
+  return seconds;
+}
+
+/**
+ * Play a career: star after star, each one finished, let go, and its Stardust spent.
+ *
+ * Runs are simulated in play time — being away is credited the same as being present, which
+ * the offline tests hold to within a couple of percent — and placed on a calendar afterwards:
+ * a star that finishes at three in the morning is let go at eight.
+ */
+export function runCareer(options: CareerOptions = {}): Career {
+  const { stars = 12, policy = 'largest', checkIns = DEFAULT_CHECK_INS, step = 1 } = options;
+  const s = initialState(0);
+  const result: CareerStar[] = [];
+  const firstOfClass = [Infinity, Infinity, Infinity, Infinity, Infinity, Infinity, Infinity];
+  let treeFull = Infinity;
+
+  // The career starts at the first check-in of the first day.
+  let clock = (checkIns[0] ?? 8) * 3600;
+
+  for (let index = 1; index <= stars; index++) {
+    if (!s.cloud) chooseByPolicy(s, policy);
+    const cloud = s.cloud as Cloud;
+    const started = s.playTime;
+
+    while (isRunning(s) && s.playTime - started < 30 * 86400) {
+      tick(s, step);
+      openWhatCanBeOpened(s);
+    }
+    const seconds = s.playTime - started;
+
+    clock = nextCheckIn(clock + seconds, checkIns);
+    const done = release(s, 0);
+    if (!done) break;
+    spendStardust(s);
+
+    const day = clock / 86400;
+    const classIndex = classIndexOf(stageIndexById(done.star.stage));
+    if (classIndex >= 0 && firstOfClass[classIndex] === Infinity) firstOfClass[classIndex] = day;
+    if (treeFull === Infinity && STARDUST_LIST.every((def) => s.stardustLevels[def.id] >= def.maxLevel)) {
+      treeFull = day;
+    }
+
+    result.push({
+      index,
+      cloud,
+      seconds,
+      name: stageAt(stageIndexById(done.star.stage)).name,
+      stardust: done.stardust,
+      discovery: done.discovery,
+      day,
+      tree: { ...s.stardustLevels },
+    });
+  }
+
+  return { stars: result, firstOfClass, treeFull };
+}
+
+/**
+ * The four kinds of cloud, side by side: the same star, the same tree, the same pace, a
+ * different character. They are meant to be near-equal — a preference, not a quiz — and this
+ * is where that is checked rather than hoped.
+ */
+export function compareTraits(ceiling = 'yellowDwarf', tree: Partial<Record<StardustId, number>> = { enrichment: 4, ignition: 2 }): Array<{ trait: Trait; seconds: number }> {
+  return TRAITS.map((trait) => {
+    const s = initialState(0);
+    // A second star: every current already open, the first one in the sky.
+    for (const def of unlockedUpgrades(s)) s.levelsEver[def.id] = 1;
+    for (const id of ['gravity', 'radius', 'density', 'particleMass', 'efficiency', 'disk', 'confinement', 'magnetic'] as const) {
+      s.levelsEver[id] = 1;
+    }
+    Object.assign(s.stardustLevels, tree);
+    s.cloud = { seed: 7, name: 'Test Cloud', ceiling, pace: 1, trait, hue: 200 };
+    const started = s.playTime;
+    while (isRunning(s) && s.playTime - started < 30 * 86400) tick(s, 1);
+    return { trait, seconds: s.playTime - started };
+  });
 }
 
 function main(): void {
@@ -301,21 +422,29 @@ function main(): void {
       `   income doubles every ${run.firstHour.doublingTime.toFixed(0)}s   (target 45-150s)`,
   );
 
-  console.log('\n  after a supernova — run 2, against how long run 1 took\n');
-  for (const push of [0, 10 * 60, 25 * 60]) {
-    const c = runCollapse(push);
-    const label = push === 0 ? 'collapse on arrival' : `${push / 60} min past the top`;
-    console.log(`  ${label}: ${format(c.stardust, 'letters')} stardust`);
-    console.log(`    spent on ${c.spent.map((x) => `${x.name} ${x.level}`).join(', ') || 'nothing'}`);
-    const line = c.firstRun.milestones
-      .map((a) => {
-        const b = c.secondRun.milestones.find((x) => x.id === a.id);
-        if (!b || !Number.isFinite(b.seconds)) return null;
-        return `${a.label.split(' ')[0]} x${(a.seconds / Math.max(b.seconds, 1)).toFixed(1)}`;
-      })
-      .filter(Boolean)
-      .join('  ');
-    console.log(`    ${line}\n`);
+  console.log('\n  the same star from each kind of cloud (a Sun, pace 1, a little of the tree)\n');
+  const traits = compareTraits();
+  const fastest = Math.min(...traits.map((t) => t.seconds));
+  console.log('  ' + traits.map((t) => `${t.trait} ${formatDuration(t.seconds)} (${((t.seconds / fastest - 1) * 100).toFixed(0)}%)`).join('   '));
+
+  for (const policy of ['largest', 'smallest'] as const) {
+    const career = runCareer({ stars: policy === 'largest' ? 70 : 20, policy, step: 2 });
+    console.log(`\n  a career, choosing the ${policy} cloud each time — checking in at ${DEFAULT_CHECK_INS.join(', ')}h\n`);
+    for (const star of career.stars) {
+      const tree = STARDUST_LIST.map((def) => `${def.name.split(' ')[0]!.slice(0, 5)} ${star.tree[def.id]}`).join(' ');
+      console.log(
+        `  ${String(star.index).padStart(3)}  ${star.name.padEnd(16)} ${star.cloud.trait.padEnd(8)} pace ${star.cloud.pace.toFixed(2)}` +
+          `  ${formatDuration(star.seconds).padStart(9)}  +${String(star.stardust).padStart(3)}` +
+          `${star.discovery ? ` +${star.discovery}` : ''}`.padEnd(6) +
+          `  day ${star.day.toFixed(1).padStart(5)}   ${tree}`,
+      );
+    }
+    const classes = ['M', 'K', 'G', 'F', 'A', 'B', 'O'];
+    console.log(
+      '\n  first of each class, day: ' +
+        career.firstOfClass.map((d, i) => `${classes[i]} ${Number.isFinite(d) ? d.toFixed(1) : '-'}`).join('  ') +
+        `   tree full: day ${Number.isFinite(career.treeFull) ? career.treeFull.toFixed(1) : '-'}`,
+    );
   }
 
   const rates = deriveRates(s);

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { D } from '../src/sim/numbers';
 import { initialState, type GameState } from '../src/sim/state';
 import {
-  AUTO_PAYBACK_HORIZON,
   awardAchievements,
   buy,
   deriveRates,
@@ -10,12 +9,14 @@ import {
   isOpen,
   levelGain,
   nextCost,
+  paybackHorizon,
   paybackSeconds,
   runAutoBuyers,
   tick,
 } from '../src/sim/economy';
 import { ACHIEVEMENTS, multiplierFor } from '../src/sim/achievements';
 import { stageIndexFor } from '../src/sim/stages';
+import { firstCloud, type Cloud } from '../src/sim/clouds';
 import { applyOffline } from '../src/sim/offline';
 import { deserialize, serialize } from '../src/sim/save';
 import { MASS_UPGRADE_IDS, UPGRADES, UPGRADE_IDS, costOfLevels, type UpgradeId } from '../src/sim/upgrades';
@@ -42,6 +43,13 @@ function flowing(levels: Partial<Record<UpgradeId, number>> = {}): GameState {
   }
   return s;
 }
+
+/**
+ * A cloud large enough that nothing here comes near spending it. The integration tests are
+ * about how income compounds, and a run that finishes inside the window measures the cap
+ * instead — both sides arrive at the same finished star, and agree for the wrong reason.
+ */
+const VAST: Cloud = { ...firstCloud(), ceiling: 'blueSupergiant' };
 
 /** Twenty minutes of a real run: every current opened as soon as it can be, then left alone. */
 function played(seconds = 1200): GameState {
@@ -107,7 +115,7 @@ describe('what the automation buys', () => {
     const rates = deriveRates(s);
     for (const id of MASS_UPGRADE_IDS) {
       const affordable = nextCost(s, id).lte(s.mass);
-      const worthIt = paybackSeconds(s, id, rates) <= AUTO_PAYBACK_HORIZON;
+      const worthIt = paybackSeconds(s, id, rates) <= paybackHorizon(s, rates);
       expect(affordable && worthIt, `${id} was affordable and worth buying`).toBe(false);
     }
   });
@@ -140,7 +148,7 @@ describe('what the automation buys', () => {
    * The card that used to eat the run. Capture saturates towards 1 and never arrives, so a
    * level of Gravity Well is always worth *something* — at level 60, about a millionth.
    */
-  it('leaves a card alone once it would not repay itself within the hour', () => {
+  it('leaves a card alone once it would not repay itself within its horizon', () => {
     const s = initialState(NOW);
     s.totalMassEver = D(1500);
     s.rebasedStage = stageIndexFor(s.totalMassEver);
@@ -148,15 +156,34 @@ describe('what the automation buys', () => {
     s.levelsEver.gravity = 60;
     s.mass = nextCost(s, 'gravity').mul(10);
 
-    expect(paybackSeconds(s, 'gravity', deriveRates(s))).toBeGreaterThan(AUTO_PAYBACK_HORIZON);
+    const rates = deriveRates(s);
+    expect(paybackSeconds(s, 'gravity', rates)).toBeGreaterThan(paybackHorizon(s, rates));
     expect(runAutoBuyers(s), 'affordable ten times over, and not bought').toBe(0);
 
     // Settled is a statement about now, not a lock: when income has grown enough that the
     // same level repays itself in time, it is bought again.
     s.levels.particleMass = 200;
-    expect(paybackSeconds(s, 'gravity', deriveRates(s))).toBeLessThan(AUTO_PAYBACK_HORIZON);
+    const richer = deriveRates(s);
+    expect(paybackSeconds(s, 'gravity', richer)).toBeLessThan(paybackHorizon(s, richer));
     expect(runAutoBuyers(s)).toBeGreaterThan(0);
     expect(s.levels.gravity).toBeGreaterThan(60);
+  });
+
+  /**
+   * A slow cloud is judged in its own time. The horizon is a number of the run's own tenfolds,
+   * so the same purchase in a cloud thirty times thinner may take thirty times as long to
+   * repay and still be the right thing to buy.
+   */
+  it('judges a slow cloud by its own pace, not by the clock', () => {
+    const at = (pace: number) => {
+      const s = flowing();
+      s.cloud = { ...VAST, pace };
+      s.totalMassEver = D('1e12');
+      s.rebasedStage = stageIndexFor(s.totalMassEver);
+      return paybackHorizon(s, deriveRates(s));
+    };
+    expect(at(0.03) / at(1)).toBeCloseTo(1 / 0.03, 1);
+    expect(at(1)).toBeGreaterThan(300);
   });
 
   /**
@@ -249,6 +276,7 @@ describe('what a level is worth', () => {
 describe('an absence', () => {
   it('resolves a fortnight away without stalling', () => {
     const s = flowing();
+    s.cloud = { ...VAST, pace: 0.05 };
     s.mass = D('1e6');
     s.totalMassEver = D('1e9');
     s.rebasedStage = stageIndexFor(s.totalMassEver);
@@ -267,6 +295,7 @@ describe('an absence', () => {
    */
   it('pays roughly what being present would have paid', () => {
     const present = flowing();
+    present.cloud = { ...VAST };
     present.mass = D(1e4);
     present.totalMassEver = D('1e9');
     present.rebasedStage = stageIndexFor(present.totalMassEver);
@@ -277,6 +306,7 @@ describe('an absence', () => {
     for (let i = 0; i < 72_000; i++) tick(present, 0.05);
 
     const away = flowing();
+    away.cloud = { ...VAST };
     away.mass = D(1e4);
     away.totalMassEver = D('1e9');
     away.rebasedStage = stageIndexFor(away.totalMassEver);
@@ -301,6 +331,7 @@ describe('an absence', () => {
   it('is converged at the step size offline uses', () => {
     const run = (dt: number) => {
       const s = flowing();
+      s.cloud = { ...VAST };
       s.mass = D(1e4);
       s.totalMassEver = D('1e9');
       s.rebasedStage = stageIndexFor(s.totalMassEver);

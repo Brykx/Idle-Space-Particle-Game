@@ -3,7 +3,8 @@ import type { GameState } from './state';
 import { ACHIEVEMENTS, multiplierFor } from './achievements';
 import { costScaleAt, stageIndexFor } from './stages';
 import { elementAt, elementTierFor, nextRequirement } from './elements';
-import { stardustEffects } from './prestige';
+import { skyMultiplier, treeEffects } from './sky';
+import { TRAIT_DEFS, capOf, isSpent, remainingOf } from './clouds';
 import {
   REBASED_UPGRADE_IDS,
   UPGRADE_LIST,
@@ -85,19 +86,35 @@ export function promotionMultiplier(stage: number): number {
 }
 
 /**
- * How long the automation is willing to wait for a purchase to pay for itself, in seconds.
+ * How long the automation is willing to wait for a purchase to pay for itself.
  *
- * This one number is what lets automation be the default rather than something to supervise.
- * Capture saturates towards 1 without ever arriving, so Gravity Well and Capture Radius keep
- * a positive gain forever — vanishingly small, never zero. An automation with no notion of
+ * This is what lets automation be the default rather than something to supervise. Capture
+ * saturates towards 1 without ever arriving, so Gravity Well and Capture Radius keep a
+ * positive gain forever — vanishingly small, never zero. An automation with no notion of
  * worth poured over half of everything into those two cards at a measured 0.0% each, and the
- * documented fix was for the player to notice and switch them off.
+ * documented fix was for the player to notice and switch them off. Past its horizon a card
+ * has *settled*, and the automation leaves it alone until that changes.
  *
- * An hour is stated in the player's terms rather than tuned to a target: an upgrade that
- * will not repay itself within an hour of play is one you would buy something else instead
- * of. Past it a card has *settled*, and the automation leaves it alone until that changes.
+ * Measured in the run's own time, not the clock's. It was a flat hour, which suited the first
+ * star and nothing else: a vast, thin cloud grows thirty times more slowly, so in it nearly
+ * every sound purchase took longer than an hour to repay, the automation under-invested, and a
+ * blue supergiant took five times as long as a blue giant where its pace said three. So the
+ * horizon is a number of *tenfolds* — how many times the star would grow tenfold, at the rate
+ * it is growing now, while the purchase repays. A tenfold takes about five minutes in the
+ * first run, so twelve of them is the hour it used to be there, and the same judgement
+ * everywhere else.
  */
-export const AUTO_PAYBACK_HORIZON = 3600;
+export const AUTO_PAYBACK_TENFOLDS = 12;
+
+/** The horizon's floor, for the opening seconds of a run, before there is a rate to measure. */
+export const AUTO_PAYBACK_FLOOR = 300;
+
+/** Seconds a purchase may take to repay itself and still be bought for you, right now. */
+export function paybackHorizon(s: GameState, rates: Rates): number {
+  if (rates.massPerSecond.lte(0) || s.totalMassEver.lte(0)) return AUTO_PAYBACK_FLOOR;
+  const tenfold = Math.LN10 * s.totalMassEver.div(rates.massPerSecond).toNumber();
+  return Number.isFinite(tenfold) ? Math.max(AUTO_PAYBACK_FLOOR, AUTO_PAYBACK_TENFOLDS * tenfold) : AUTO_PAYBACK_FLOOR;
+}
 
 /**
  * Safety net on auto-purchases per tick, not a budget.
@@ -127,8 +144,20 @@ export interface Rates {
   stage: number;
   /** What the ladder alone is currently multiplying income by. */
   promotionMultiplier: number;
-  /** What Stardust alone is currently multiplying income by. */
+  /** What the tree's Enrichment is currently multiplying income by. */
   stardustMultiplier: number;
+  /** What the stars already in your sky are multiplying income by. */
+  skyMultiplier: number;
+  /** The cloud's pace and character, as one flat multiplier. 0 with no cloud. */
+  cloudMultiplier: number;
+  /**
+   * Fraction of the cloud still unspent, 0..1. Income is multiplied by it, which is what
+   * makes a run end: growth is exponential for almost all of it and then eases off until the
+   * star has everything the cloud held.
+   */
+  remaining: number;
+  /** The cloud is spent and the star is finished. Nothing more will fall in. */
+  complete: boolean;
   spawnRate: number;
   massPerParticle: Num;
   globalMultiplier: number;
@@ -149,27 +178,40 @@ export interface Rates {
 
 /** Pure: state in, every derived number out. Used by the UI, the renderer and the tests alike. */
 export function deriveRates(s: GameState): Rates {
+  // What the cloud is like. Between stars there is no cloud, and nothing falls in at all.
+  const trait = s.cloud ? TRAIT_DEFS[s.cloud.trait] : null;
+
   const gravity = BASE_GRAVITY * Math.pow(GRAVITY_STEP, s.levels.gravity);
   const radius = BASE_RADIUS + RADIUS_STEP * s.levels.radius;
-  const spawnRate = BASE_SPAWN * Math.pow(DENSITY_STEP, s.levels.density);
-  const massPerParticle = D(PARTICLE_MASS_STEP).pow(s.levels.particleMass);
+  const spawnRate = BASE_SPAWN * Math.pow(DENSITY_STEP, s.levels.density) * (trait?.spawn ?? 1);
+  const massPerParticle = D(PARTICLE_MASS_STEP).pow(s.levels.particleMass).mul(trait?.value ?? 1);
 
   // Climbing the ladder pays. Everything else here is something you bought.
   const stage = stageIndexFor(s.totalMassEver);
   const ladderMultiplier = promotionMultiplier(stage);
 
-  // Everything Stardust does to income enters here and nowhere else. A prestige layer that
-  // reaches into three or four terms is a prestige layer nobody can balance.
-  const stardust = stardustEffects(s);
+  // Everything permanent enters here and nowhere else. A long game that reaches into three or
+  // four terms of the formula is a long game nobody can balance.
+  const tree = treeEffects(s);
+  const sky = skyMultiplier(s);
+  const cloudMultiplier = s.cloud && trait ? s.cloud.pace * trait.global : 0;
 
   const globalMultiplier =
     Math.pow(EFFICIENCY_STEP, s.levels.efficiency) *
     multiplierFor(s.achievements.length) *
     ladderMultiplier *
-    stardust.massMultiplier;
+    tree.massMultiplier *
+    sky *
+    cloudMultiplier;
 
-  const reach = radius * Math.sqrt(gravity);
+  const reach = radius * Math.sqrt(gravity) * (trait?.reach ?? 1);
   const captureFraction = captureAt(reach);
+
+  // A finished star is finished: once the cloud is spent nothing more falls in, rather than a
+  // trickle that never quite stops.
+  const remaining = remainingOf(s.cloud, s.totalMassEver);
+  const complete = isSpent(s.cloud, s.totalMassEver);
+  const infall = complete ? 0 : remaining;
 
   // The energy economy, computed from the *raw* infall rather than the finished one.
   //
@@ -177,21 +219,22 @@ export function deriveRates(s: GameState): Rates {
   // per particle, and mass income would otherwise decide energy — a cycle. Taxing the raw
   // infall breaks it, and it is the more honest reading anyway. The disk extracts energy from
   // material falling in; what the core then fuses it into is a separate question.
-  const rawMassPerSecond = massPerParticle.mul(spawnRate * captureFraction * globalMultiplier);
+  const rawMassPerSecond = massPerParticle.mul(spawnRate * captureFraction * globalMultiplier * infall);
 
   // A disk forms once the core is heavy enough to have one; the upgrades sharpen the one you
   // have. Everything on this side is bought with energy, and energy is taxed from the *raw*
   // infall, so an element tier can never fund the disk level that reaches the next tier.
   // That loop is what made the first two attempts cascade through the whole chain at once.
   const hasDisk = s.totalMassEver.gte(UPGRADES.disk.unlockAt);
-  const diskThroughput = BASE_THROUGHPUT * Math.pow(1.15, s.levels.disk) * Math.pow(1.12, s.levels.magnetic);
+  const diskThroughput =
+    BASE_THROUGHPUT * Math.pow(1.15, s.levels.disk) * Math.pow(1.12, s.levels.magnetic) * (trait?.throughput ?? 1);
   const energyPerSecond = hasDisk ? rawMassPerSecond.mul(diskThroughput) : D(0);
 
   const requirementScale = Math.pow(0.9, s.levels.confinement);
   // Prior Ignition is a floor, not a bonus: the nebula is already salted with what you fused
   // last time, so the chain starts partway up rather than every tier being worth more.
   const elementTier = Math.max(
-    stardust.startingTier,
+    tree.startingTier,
     hasDisk ? elementTierFor(diskThroughput, requirementScale) : 0,
   );
   const elementMultiplier = elementAt(elementTier).multiplier;
@@ -205,7 +248,11 @@ export function deriveRates(s: GameState): Rates {
     captureFraction,
     stage,
     promotionMultiplier: ladderMultiplier,
-    stardustMultiplier: stardust.massMultiplier,
+    stardustMultiplier: tree.massMultiplier,
+    skyMultiplier: sky,
+    cloudMultiplier,
+    remaining,
+    complete,
     spawnRate,
     massPerParticle: massPerParticle.mul(elementMultiplier),
     globalMultiplier,
@@ -219,11 +266,20 @@ export function deriveRates(s: GameState): Rates {
   };
 }
 
-/** Credit mass and keep the running total honest. The single place mass is created. */
+/**
+ * Credit mass and keep the running total honest. The single place mass is created.
+ *
+ * Never more than the cloud has left. Income already falls as the cloud is spent, but a long
+ * offline step credits its whole length at the rate it started with, and without this a coarse
+ * enough step could put more mass into a star than its cloud ever held.
+ */
 export function earn(s: GameState, amount: Num): void {
-  if (amount.lte(0)) return;
-  s.mass = s.mass.add(amount);
-  s.totalMassEver = s.totalMassEver.add(amount);
+  if (!s.cloud || amount.lte(0)) return;
+  const room = capOf(s.cloud).sub(s.totalMassEver);
+  if (room.lte(0)) return;
+  const credited = amount.gt(room) ? room : amount;
+  s.mass = s.mass.add(credited);
+  s.totalMassEver = s.totalMassEver.add(credited);
 }
 
 export function earnEnergy(s: GameState, amount: Num): void {
@@ -281,11 +337,13 @@ export function currentsFlowing(s: GameState): number {
  * level tips the core over a fusion threshold — and no marginal figure describes that.
  */
 export function levelGain(id: UpgradeId, rates: Rates): number {
+  // Written in terms of `rates.reach`, which already carries the cloud's own reach, so the
+  // estimate cannot forget a factor the formula remembered.
   switch (id) {
     case 'gravity':
-      return captureAt(rates.radius * Math.sqrt(rates.gravity * GRAVITY_STEP)) / rates.captureFraction - 1;
+      return captureAt(rates.reach * Math.sqrt(GRAVITY_STEP)) / rates.captureFraction - 1;
     case 'radius':
-      return captureAt((rates.radius + RADIUS_STEP) * Math.sqrt(rates.gravity)) / rates.captureFraction - 1;
+      return captureAt((rates.reach * (rates.radius + RADIUS_STEP)) / rates.radius) / rates.captureFraction - 1;
     case 'density':
       return DENSITY_STEP - 1;
     case 'particleMass':
@@ -323,6 +381,7 @@ export function runAutoBuyers(s: GameState): number {
   let bought = 0;
   // Derived lazily and only refreshed after a purchase: most ticks buy nothing.
   let rates: Rates | null = null;
+  let horizon = 0;
 
   for (let n = 0; n < MAX_AUTO_PURCHASES_PER_TICK; n++) {
     let bestId: UpgradeId | null = null;
@@ -339,9 +398,12 @@ export function runAutoBuyers(s: GameState): number {
         // competition, and the sooner a fusion tier lands the better.
         score = -1;
       } else {
-        rates ??= deriveRates(s);
+        if (!rates) {
+          rates = deriveRates(s);
+          horizon = paybackHorizon(s, rates);
+        }
         score = paybackSeconds(s, def.id, rates);
-        if (score > AUTO_PAYBACK_HORIZON) continue;
+        if (score > horizon) continue;
       }
 
       if (score < bestScore) {
@@ -419,9 +481,18 @@ export function tick(s: GameState, dt: number): void {
   if (!(dt > 0)) return;
 
   const rates = deriveRates(s);
+  s.playTime += dt;
+
+  // Between stars, and after one has finished, time passes and nothing else happens. That
+  // stillness is deliberate. Achievements are still checked: an absence can earn the ones
+  // about being away.
+  if (!s.cloud || rates.complete) {
+    awardAchievements(s, rates);
+    return;
+  }
+
   earn(s, rates.massPerSecond.mul(dt));
   earnEnergy(s, rates.energyPerSecond.mul(dt));
-  s.playTime += dt;
 
   // Before the auto-buyers spend: a promotion reprices what they are about to buy, and
   // buying at the old price and then zeroing the level would burn the purchase.
@@ -436,6 +507,11 @@ export function tick(s: GameState, dt: number): void {
   // `sim/offline.ts`, which picks one based on whether automation is running.
   runAutoBuyers(s);
   awardAchievements(s, rates);
+}
+
+/** A star is condensing: there is a cloud, and it is not yet spent. */
+export function isRunning(s: GameState): boolean {
+  return s.cloud !== null && !isSpent(s.cloud, s.totalMassEver);
 }
 
 export function isUnlocked(s: GameState, def: UpgradeDef): boolean {

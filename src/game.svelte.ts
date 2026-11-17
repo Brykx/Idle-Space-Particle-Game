@@ -1,4 +1,4 @@
-import { format, formatDuration, type Notation, type Num } from './sim/numbers';
+import { format, formatDuration, type Notation } from './sim/numbers';
 import {
   buy,
   currentsOpen,
@@ -17,31 +17,39 @@ import { applyOffline, type AwayReport } from './sim/offline';
 import {
   STARDUST_LIST,
   buyStardust,
-  canCollapse,
-  collapse,
+  canRelease,
+  chooseCloud,
+  discoveryFor,
+  offersFor,
+  release,
+  releaseValue,
+  renameStar,
   stardustCost,
-  stardustEffects,
-  stardustFor,
+  treeEffects,
+  yieldFor,
   type StardustId,
-} from './sim/prestige';
-import { ACCRETION_STAGES, STAGES, stageAt, stageIndexFor, stageProgress } from './sim/stages';
+} from './sim/sky';
+import { TRAIT_DEFS, capOf, ceilingStageOf } from './sim/clouds';
+import { forecastCloud, forecastRemaining, roughly } from './sim/forecast';
+import { STAGES, stageAt, stageIndexById, stageIndexFor, stageOfClass, stageProgress, type Fate } from './sim/stages';
 
-/** Index of the last stage accretion alone can reach — the one a collapse is offered at. */
-const ACCRETION_TOP = ACCRETION_STAGES.length - 1;
-
-/** The neutron star: what a supernova leaves, and the only place it is shown for now. */
+/** The neutron star: what a supernova leaves, and the only remnant drawn for now. */
 const REMNANT_STAGE = STAGES.findIndex((stage) => stage.look.body === 'remnant');
 
-/**
- * Stardust is a counting number, so it is shown as one until it stops being countable.
- *
- * The general formatter prints "6.00", which is right for mass — a continuous quantity you
- * only ever see two significant figures of — and wrong for a currency where the difference
- * between 6 and 7 is a purchase.
- */
-function formatStardust(value: Num, notation: Notation): string {
-  return value.lt(1e5) ? String(Math.floor(value.toNumber())) : format(value, notation);
+/** Stardust is a counting number, so it is shown as one. */
+function formatStardust(value: number): string {
+  return Math.floor(value).toLocaleString('en-US');
 }
+
+/** What a star leaves, as a phrase that finishes "it leaves…". */
+const FATE_WORDS: Record<Fate, string> = {
+  ember: 'nothing: a red dwarf has never died',
+  nebula: 'a white dwarf, in a shell of its own gas',
+  supernova: 'a supernova, and a neutron star',
+};
+
+/** CSS colour for a packed RGB number. */
+const css = (rgb: number) => `#${rgb.toString(16).padStart(6, '0')}`;
 import { deserialize, exportSave as exportSaveString, importSave, serialize } from './sim/save';
 import { clearSave, readSave, writeSave } from './storage';
 import { createField, type FieldHandle } from './render/Field';
@@ -112,6 +120,41 @@ export interface StardustView {
   cost: string;
   affordable: boolean;
   maxed: boolean;
+  maxLevel: number;
+}
+
+export interface CloudView {
+  index: number;
+  name: string;
+  /** The largest class it can make, e.g. "Blue Giant". */
+  ceiling: string;
+  letter: string;
+  colour: string;
+  trait: string;
+  traitBlurb: string;
+  /** Roughly how long a star from it would take, in words. */
+  eta: string;
+  /** Stardust the finished star would pay, discovery included. */
+  worth: number;
+  /** The first of its class: it would fill a place in the catalogue. */
+  discovery: boolean;
+  hue: number;
+}
+
+export interface StarView {
+  id: number;
+  name: string;
+  className: string;
+  letter: string;
+  colour: string;
+  /** The day you made it. */
+  made: string;
+  /** How long it took, from choosing its cloud. */
+  took: string;
+  completed: boolean;
+  cloud: string;
+  x: number;
+  y: number;
 }
 
 export interface ElementRowView {
@@ -160,17 +203,39 @@ export interface View {
   nextPromotion: string;
   stages: StageRowView[];
 
-  // --- the supernova -------------------------------------------------------------------
+  // --- the run -------------------------------------------------------------------------
+  /** Between stars, choosing the next cloud. The field is empty. */
+  choosing: boolean;
+  cloudName: string;
+  /** The largest class this cloud can make. */
+  cloudCeiling: string;
+  cloudTrait: string;
+  cloudHue: number;
+  /** 0..1 of the cloud still unspent. */
+  remaining: number;
+  /** The cloud is spent: the star is finished, and waiting to be let go. */
+  complete: boolean;
+  /** Roughly how long until it is, in words. Empty when it is, or between stars. */
+  eta: string;
+  offers: CloudView[];
+
+  // --- letting go ----------------------------------------------------------------------
+  canRelease: boolean;
+  /** The class it would be let go as. */
+  releaseAs: string;
+  /** What it would leave behind, in words. */
+  releaseFate: string;
+  releaseStardust: number;
+  releaseDiscovery: number;
+  /** True while the field is showing what the star left, just after it was let go. */
+  releasing: boolean;
+
+  // --- the sky -------------------------------------------------------------------------
   stardust: string;
-  collapses: string;
-  canCollapse: boolean;
-  /** What a collapse would pay right now. */
-  collapseYield: string;
-  /** Shown instead, when it is not yet possible. */
-  collapseRequirement: string;
   stardustUpgrades: StardustView[];
-  /** True while the field is showing the remnant, just after a collapse. */
-  supernova: boolean;
+  sky: StarView[];
+  /** What the stars in your sky multiply all mass by, e.g. "x1.12". */
+  skyBonus: string;
 
   /** Set when something is unlocked; clears itself after a few seconds. */
   announceEyebrow: string;
@@ -236,13 +301,25 @@ function emptyView(): View {
     nextStageThreshold: '',
     ladderBonus: '',
     nextPromotion: '',
+    choosing: false,
+    cloudName: '',
+    cloudCeiling: '',
+    cloudTrait: '',
+    cloudHue: 214,
+    remaining: 1,
+    complete: false,
+    eta: '',
+    offers: [],
+    canRelease: false,
+    releaseAs: '',
+    releaseFate: '',
+    releaseStardust: 0,
+    releaseDiscovery: 0,
+    releasing: false,
     stardust: '0',
-    collapses: '0',
-    canCollapse: false,
-    collapseYield: '0',
-    collapseRequirement: '',
     stardustUpgrades: [],
-    supernova: false,
+    sky: [],
+    skyBonus: 'x1.00',
     stages: [],
     announceEyebrow: '',
     announceTitle: '',
@@ -272,7 +349,7 @@ function emptyView(): View {
     elements: [],
     playTime: '0s',
     purchases: 0,
-    notation: 'letters',
+    notation: 'words',
     particleBudget: 1200,
     reducedMotion: false,
     away: null,
@@ -293,8 +370,11 @@ function createGame() {
   let running = false;
   let frameHandle = 0;
   let accumulator = 0;
-  /** `playTime` until which the field shows the remnant instead of the current stage. */
-  let supernovaUntil = 0;
+  /** `playTime` until which the field shows what the last star left, not the new run. */
+  let releasingUntil = 0;
+  /** Forecasts are a simulation, so they are kept and refreshed rather than redone per frame. */
+  let etaCache = { key: '', at: -Infinity, value: '' };
+  let offersCache: { key: string; views: CloudView[] } = { key: '', views: [] };
   let uiTimer = 0;
   let fieldTimer = 0;
   let saveTimer = 0;
@@ -364,6 +444,58 @@ function createGame() {
     announceTimer = ANNOUNCE_SECONDS;
   }
 
+  // ---------------------------------------------------------------- forecasts
+
+  /** A stage id from a save, as a ladder index, without throwing on one this build lacks. */
+  function safeStageIndex(id: string): number {
+    try {
+      return stageIndexById(id);
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Roughly when this star will be finished. Re-forecast every half minute of play, or when
+   * something the forecast depends on changes; a word does not need refreshing per frame.
+   */
+  function runEta(): string {
+    if (!state.cloud) return '';
+    const key = `${state.sky.length}|${state.cloud.seed}|${Object.values(state.stardustLevels).join(',')}`;
+    if (key !== etaCache.key || state.playTime - etaCache.at > 30) {
+      const seconds = forecastRemaining(state);
+      etaCache = { key, at: state.playTime, value: seconds > 0 ? roughly(seconds) : '' };
+    }
+    return etaCache.value;
+  }
+
+  /** The clouds on offer, each with a forecast. Computed once per choice, not per frame. */
+  function offerViews(): CloudView[] {
+    if (state.cloud) return [];
+    const key = `${state.skySeed}|${state.sky.length}|${Object.values(state.stardustLevels).join(',')}`;
+    if (key === offersCache.key) return offersCache.views;
+
+    const views = offersFor(state).map((cloud, index) => {
+      const stage = stageAt(ceilingStageOf(cloud));
+      const discovery = discoveryFor(state, ceilingStageOf(cloud));
+      return {
+        index,
+        name: cloud.name,
+        ceiling: stage.name,
+        letter: stage.spectral ?? '',
+        colour: css(stage.look.core),
+        trait: TRAIT_DEFS[cloud.trait].name,
+        traitBlurb: TRAIT_DEFS[cloud.trait].blurb,
+        eta: roughly(forecastCloud(state, cloud)),
+        worth: yieldFor(capOf(cloud).mul(0.9995)) + discovery,
+        discovery: discovery > 0,
+        hue: cloud.hue,
+      };
+    });
+    offersCache = { key, views };
+    return views;
+  }
+
   // ---------------------------------------------------------------- the view
 
   function refreshView(): void {
@@ -377,39 +509,72 @@ function createGame() {
     view.stageName = progress.stage.name;
     view.stageAnalogue = progress.stage.analogue;
     view.stageFraction = progress.fraction;
-    view.nextStageName = progress.next?.name ?? '';
-    view.nextStageThreshold = progress.next?.threshold
-      ? format(progress.next.threshold, notation)
-      : '';
+    // The ladder goes on, but this cloud does not: past its ceiling there is no next stage.
+    const next = state.cloud && progress.index >= ceilingStageOf(state.cloud) ? null : progress.next;
+    view.nextStageName = next?.name ?? '';
+    view.nextStageThreshold = next?.threshold ? format(next.threshold, notation) : '';
 
     // The ladder has to be visibly worth climbing, or this is the old problem wearing a
     // different hat: the multiplier is real but folded into a number nobody attributes to it.
     view.ladderBonus = rates.promotionMultiplier > 1.005 ? `x${rates.promotionMultiplier.toFixed(2)}` : '';
-    view.nextPromotion = progress.next
+    view.nextPromotion = next
       ? `x${(promotionMultiplier(progress.index + 1) / rates.promotionMultiplier).toFixed(2)}`
       : '';
 
-    // --- the supernova ---------------------------------------------------------------
-    view.stardust = formatStardust(state.stardust, notation);
-    view.collapses = String(state.collapses);
-    view.canCollapse = canCollapse(state);
-    view.collapseYield = formatStardust(stardustFor(state), notation);
-    view.collapseRequirement = view.canCollapse
-      ? ''
-      : `Reach ${stageAt(ACCRETION_TOP).name} to collapse`;
+    // --- the run -----------------------------------------------------------------------
+    const cloud = state.cloud;
+    view.choosing = cloud === null;
+    view.cloudName = cloud?.name ?? '';
+    view.cloudCeiling = cloud ? stageAt(ceilingStageOf(cloud)).name : '';
+    view.cloudTrait = cloud ? TRAIT_DEFS[cloud.trait].name : '';
+    view.cloudHue = cloud?.hue ?? view.cloudHue;
+    view.remaining = rates.remaining;
+    view.complete = rates.complete;
+    view.eta = runEta();
+    view.offers = offerViews();
 
-    const effects = stardustEffects(state);
+    // --- letting go ----------------------------------------------------------------------
+    view.canRelease = canRelease(state);
+    const value = releaseValue(state);
+    const asStage = stageAt(progress.index);
+    view.releaseAs = view.canRelease ? asStage.name : '';
+    view.releaseFate = view.canRelease && asStage.fate ? FATE_WORDS[asStage.fate] : '';
+    view.releaseStardust = value.stardust;
+    view.releaseDiscovery = value.discovery;
+    view.releasing = state.playTime < releasingUntil;
+
+    // --- the sky -----------------------------------------------------------------------
+    view.stardust = formatStardust(state.stardust);
+    view.skyBonus = `x${rates.skyMultiplier.toFixed(2)}`;
+    view.sky = state.sky
+      .map((star) => {
+        const stage = stageAt(safeStageIndex(star.stage));
+        return {
+          id: star.id,
+          name: star.name,
+          className: stage.name,
+          letter: stage.spectral ?? '',
+          colour: css(stage.look.core),
+          made: new Date(star.releasedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+          took: formatDuration(star.seconds),
+          completed: star.completed,
+          cloud: star.cloud,
+          x: star.x,
+          y: star.y,
+        };
+      })
+      .reverse();
+
+    const tree = treeEffects(state);
     const effectOf: Record<StardustId, string> = {
-      enrichment: effects.massMultiplier > 1 ? `x${effects.massMultiplier.toFixed(2)} to all mass` : 'none',
-      seed: effects.seedMass.gt(0) ? `${format(effects.seedMass, notation)} starting mass` : 'none',
-      ignition: effects.startingTier > 0 ? `start at ${elementAt(effects.startingTier).name}` : 'none',
+      reach: `clouds up to ${stageAt(stageOfClass(tree.maxClass)).name}`,
+      enrichment: tree.massMultiplier > 1 ? `x${tree.massMultiplier.toFixed(2)} to all mass` : 'none yet',
+      ignition: tree.startingTier > 0 ? `start at ${elementAt(tree.startingTier).name}` : 'start at hydrogen',
+      gaze: `${tree.offers} clouds to choose from`,
     };
-
-    view.supernova = state.playTime < supernovaUntil;
 
     view.stardustUpgrades = STARDUST_LIST.map((def) => {
       const level = state.stardustLevels[def.id];
-      const maxed = level >= def.maxLevel;
       const cost = stardustCost(def, level);
       return {
         id: def.id,
@@ -418,9 +583,10 @@ function createGame() {
         perLevel: def.perLevel,
         effect: effectOf[def.id],
         level,
-        cost: formatStardust(cost, notation),
-        affordable: state.stardust.gte(cost),
-        maxed,
+        maxLevel: def.maxLevel,
+        cost: cost === null ? '' : formatStardust(cost),
+        affordable: cost !== null && state.stardust >= cost,
+        maxed: cost === null,
       };
     });
 
@@ -434,8 +600,8 @@ function createGame() {
       current: index === progress.index,
     }));
 
-    // Announce a promotion once. If several were crossed at once — a big pulse, a long
-    // absence — only the highest is worth saying.
+    // Announce a promotion once. If several were crossed at once — a long absence — only the
+    // highest is worth saying.
     if (progress.index > state.stageSeen) {
       state.stageSeen = progress.index;
       announce('You are now', progress.stage.name, progress.stage.blurb);
@@ -488,7 +654,7 @@ function createGame() {
         term: def.term,
         perLevel: def.perLevel,
         level: state.levels[def.id],
-        cost: formatStardust(cost, notation),
+        cost: format(cost, notation),
         affordable,
         maxLevels: best.levels,
         maxCost: format(best.cost, notation),
@@ -582,12 +748,14 @@ function createGame() {
     const rates = deriveRates(state);
     // Just after a collapse the field shows what you became rather than what you are now.
     // The run underneath has already restarted; this is only the view lagging on purpose.
-    const remnant = state.playTime < supernovaUntil;
+    const remnant = state.playTime < releasingUntil;
     const { look } = remnant ? stageAt(REMNANT_STAGE) : stageAt(stageIndexFor(state.totalMassEver));
     field.setRates({
       // Emission tracks the real spawn rate until it outgrows the screen, then grows
       // logarithmically so the field keeps thickening without ever flooding.
-      spawnRate: rates.spawnRate <= 60 ? rates.spawnRate : 60 + Math.log10(rates.spawnRate / 60) * 80,
+      // The field thins as the cloud is spent, and is empty between stars: completion looks
+      // like stillness.
+      spawnRate: (rates.spawnRate <= 60 ? rates.spawnRate : 60 + Math.log10(rates.spawnRate / 60) * 80) * rates.remaining,
       captureFraction: rates.captureFraction,
       coreScale: look.scale,
       coreColour: look.core,
@@ -737,21 +905,39 @@ function createGame() {
     },
 
     /**
-     * Collapse the star.
+     * Let the star go.
      *
-     * The field shows the remnant for a moment before the new run's dust arrives, which is
-     * the only place the neutron star body appears until the second prestige exists. It is
-     * also the one payoff the ladder's top has: you see what you became.
+     * The field keeps showing what it left for a few seconds before it empties, which is the
+     * only place the remnant is drawn for now. The run has already ended underneath.
      */
-    collapse(): void {
-      const gained = collapse(state);
-      if (gained === null) return;
-      supernovaUntil = state.playTime + SUPERNOVA_SECONDS;
-      announce('SUPERNOVA', `${formatStardust(gained, state.settings.notation)} stardust`, 'What is left of you is a neutron star, and a cloud you will condense out of again.');
+    release(): void {
+      const done = release(state, Date.now());
+      if (!done) return;
+      releasingUntil = state.playTime + SUPERNOVA_SECONDS;
+      const paid = done.stardust + done.discovery;
+      announce(
+        'Into your sky',
+        done.star.name,
+        `${stageAt(safeStageIndex(done.star.stage)).name}. It leaves ${FATE_WORDS[done.fate]}. ${formatStardust(paid)} stardust${done.discovery ? ', for a discovery among it' : ''}.`,
+      );
       showNextAnnouncement();
       save();
       refreshView();
       refreshField();
+    },
+
+    /** Begin the next star from one of the clouds on offer. */
+    chooseCloud(index: number): void {
+      if (!chooseCloud(state, index)) return;
+      save();
+      refreshView();
+      refreshField();
+    },
+
+    renameStar(id: number, name: string): void {
+      if (!renameStar(state, id, name)) return;
+      save();
+      refreshView();
     },
 
     setAutoBuyReserve(fraction: number): void {

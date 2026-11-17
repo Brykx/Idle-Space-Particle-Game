@@ -75,7 +75,7 @@ describe('progress within a stage', () => {
     const top = stageProgress(D('1e300'));
     expect(top.next).toBeNull();
     expect(top.fraction).toBe(1);
-    expect(top.stage.id).toBe('supergiant');
+    expect(top.stage.id).toBe('blueSupergiant');
   });
 });
 

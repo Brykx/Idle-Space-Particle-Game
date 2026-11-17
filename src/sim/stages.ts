@@ -11,11 +11,16 @@ import { D, type Num } from './numbers';
  * a star by putting on more rock, but a gas giant can ladder up through brown dwarf to red
  * dwarf, and those thresholds are real.
  *
- * The ladder breaks exactly once, between star and neutron star, and it breaks in a useful
- * direction: a star does not become a neutron star by gaining mass, it runs out of fuel and
- * blows roughly ninety percent of itself away. Mass goes *down* by more than an order of
- * magnitude. That is a prestige reset, which is why the last two stages here carry no
- * threshold — they arrive with the supernova in Phase 3, not by accretion.
+ * From the first star onwards the ladder is the spectral sequence: M, K, G, F, A, B, O. It
+ * used to be three rungs called Red Dwarf, Star and Supergiant, which were three points
+ * picked off this sequence and given invented names. The real one has seven classes, each
+ * with a colour that is simply its temperature, and a fate decided by its mass — which is
+ * what makes a star you made worth keeping, and one class of them different from another.
+ *
+ * What a star *becomes* is not on the ladder. A star does not turn into a neutron star by
+ * gaining mass; it runs out of fuel and throws most of itself away. The last two entries
+ * carry no threshold for that reason. They are bodies the renderer knows how to draw, for
+ * the moment a star is let go and for the black hole still to come.
  */
 
 /**
@@ -29,6 +34,20 @@ export type BodyKind = 'mote' | 'rock' | 'world' | 'gas' | 'ember' | 'star' | 'r
 
 /** What a single infalling particle is: a speck of dust, a grain, or a lit body. */
 export type GrainKind = 'mote' | 'grit' | 'rock';
+
+/** The seven classes of the main sequence, coolest and lightest first. */
+export const SPECTRAL_CLASSES = ['M', 'K', 'G', 'F', 'A', 'B', 'O'] as const;
+export type SpectralClass = (typeof SPECTRAL_CLASSES)[number];
+
+/**
+ * How a star ends.
+ *
+ * - `ember`: a red dwarf burns so slowly that none has ever died. It simply stays.
+ * - `nebula`: under about eight solar masses a star puffs its envelope off as a shell of gas
+ *   and leaves a white dwarf in the middle of it.
+ * - `supernova`: over it, the core collapses and the rest is thrown out in one event.
+ */
+export type Fate = 'ember' | 'nebula' | 'supernova';
 
 export interface StageLook {
   /** Which family of body this stage is, and therefore how it is rendered. */
@@ -125,6 +144,13 @@ export interface Stage {
   blurb: string;
   /** What this would weigh in the real world. */
   analogue: string;
+  /**
+   * Spectral class, for the stages that are stars. Its presence is what makes a stage one
+   * you can let go of and keep.
+   */
+  spectral?: SpectralClass;
+  /** What a star of this class leaves behind. Decided by mass, as it is in the sky. */
+  fate?: Fate;
   look: StageLook;
 }
 
@@ -282,12 +308,24 @@ export const STAGES: Stage[] = [
       tilt: 0.62,
     },
   },
+  // --- the main sequence ---------------------------------------------------------------
+  //
+  // The gaps widen on the way up, because the stars do: an O star is not a little heavier
+  // than a B star, it is several times heavier, and the cloud that makes one is vast. The
+  // promotion multiplier is derived from the gap, so a wider one pays a larger step and the
+  // climb keeps its pace — a class simply lasts longer the hotter it is.
+  //
+  // Size barely changes across the seven, on purpose. Real main-sequence radii span a factor
+  // of twenty; drawn to scale a red dwarf would be a dot and nothing would be learned from
+  // it. What the classes differ by, on screen, is colour and surface.
   {
     id: 'redDwarf',
     name: 'Red Dwarf',
     threshold: D(6e14),
     blurb: 'Eighty Jupiters. Hydrogen fusion holds against your own weight. You are a star.',
     analogue: '0.08 solar masses',
+    spectral: 'M',
+    fate: 'ember',
     look: { body: 'star', core: 0xff7a45, particle: 0xffc08a, scale: 0.74,
       particleSize: 1.3,
       particleCount: 1.0,
@@ -300,31 +338,111 @@ export const STAGES: Stage[] = [
     },
   },
   {
-    id: 'star',
-    name: 'Star',
-    threshold: D(1.2e17),
-    blurb: 'Hydrogen to helium, steadily, for a long time. The cloud around you is lit from inside now.',
+    id: 'orangeDwarf',
+    name: 'Orange Dwarf',
+    threshold: D(6e16),
+    blurb: 'Steadier than the Sun and longer lived. If anything is going to have time to happen nearby, it is here.',
+    analogue: '0.7 solar masses',
+    spectral: 'K',
+    fate: 'nebula',
+    look: { body: 'star', core: 0xffa95e, particle: 0xffcf9a, scale: 0.79,
+      particleSize: 1.34,
+      particleCount: 0.95,
+      orbit: [0.17, 0.35],
+      drag: 0.47,
+      lifetime: 9.5,
+      width: 0.53,
+      grain: 'rock',
+      tilt: 0.67,
+    },
+  },
+  {
+    id: 'yellowDwarf',
+    name: 'Yellow Dwarf',
+    threshold: D(1.2e19),
+    blurb: 'Hydrogen to helium, steadily, for ten billion years. The cloud around you is lit from inside now.',
     analogue: 'the Sun',
-    look: { body: 'star', core: 0xfff3c4, particle: 0xffe6b0, scale: 0.86,
-      particleSize: 1.4,
-      particleCount: 0.87,
-      orbit: [0.15, 0.32],
+    spectral: 'G',
+    fate: 'nebula',
+    look: { body: 'star', core: 0xfff3c4, particle: 0xffe6b0, scale: 0.84,
+      particleSize: 1.38,
+      particleCount: 0.905,
+      orbit: [0.16, 0.33],
       drag: 0.5,
       lifetime: 9,
+      width: 0.51,
+      grain: 'rock',
+      tilt: 0.68,
+    },
+  },
+  {
+    id: 'whiteStar',
+    name: 'White Star',
+    threshold: D(6e21),
+    blurb: 'Hot enough that the surface has stopped boiling. The granulation is fading out.',
+    analogue: 'Procyon',
+    spectral: 'F',
+    fate: 'nebula',
+    look: { body: 'star', core: 0xfffaf0, particle: 0xfff0d8, scale: 0.88,
+      particleSize: 1.41,
+      particleCount: 0.875,
+      orbit: [0.15, 0.31],
+      drag: 0.52,
+      lifetime: 8.8,
       width: 0.5,
       grain: 'rock',
       tilt: 0.69,
     },
   },
   {
-    id: 'supergiant',
-    name: 'Supergiant',
-    threshold: D(1.5e19),
-    blurb: 'Carbon, oxygen, silicon. Each shell you light burns faster than the last, and iron is waiting.',
-    analogue: '20 solar masses',
-    look: { body: 'star', core: 0xffb347, particle: 0xffd0a0, scale: 1,
+    id: 'blueWhiteStar',
+    name: 'Blue-White Star',
+    threshold: D(6e24),
+    blurb: 'Twice the Sun, twenty times as bright. The envelope carries its heat as light, and the surface is smooth.',
+    analogue: 'Sirius',
+    spectral: 'A',
+    fate: 'nebula',
+    look: { body: 'star', core: 0xdfe8ff, particle: 0xe6ecff, scale: 0.92,
+      particleSize: 1.44,
+      particleCount: 0.847,
+      orbit: [0.14, 0.3],
+      drag: 0.54,
+      lifetime: 8.5,
+      width: 0.49,
+      grain: 'rock',
+      tilt: 0.7,
+    },
+  },
+  {
+    id: 'blueGiant',
+    name: 'Blue Giant',
+    threshold: D(2e28),
+    blurb: 'Past eight solar masses. There is no quiet ending from here: when this one goes, it goes at once.',
+    analogue: 'Rigel',
+    spectral: 'B',
+    fate: 'supernova',
+    look: { body: 'star', core: 0xb9ccff, particle: 0xd0dcff, scale: 0.96,
+      particleSize: 1.47,
+      particleCount: 0.82,
+      orbit: [0.13, 0.29],
+      drag: 0.56,
+      lifetime: 8.2,
+      width: 0.47,
+      grain: 'rock',
+      tilt: 0.71,
+    },
+  },
+  {
+    id: 'blueSupergiant',
+    name: 'Blue Supergiant',
+    threshold: D(2e32),
+    blurb: 'One star in three million. It will burn through everything it has in the time the Sun takes to warm up.',
+    analogue: 'Alnitak',
+    spectral: 'O',
+    fate: 'supernova',
+    look: { body: 'star', core: 0x9bb7ff, particle: 0xc2d2ff, scale: 1,
       particleSize: 1.5,
-      particleCount: 0.77,
+      particleCount: 0.796,
       orbit: [0.12, 0.28],
       drag: 0.58,
       lifetime: 8,
@@ -334,7 +452,7 @@ export const STAGES: Stage[] = [
     },
   },
 
-  // --- reached by collapse, not by accretion (Phase 3) -------------------------------
+  // --- what a star becomes, not what it grows into ---------------------------------------
   {
     id: 'neutronStar',
     name: 'Neutron Star',
@@ -371,8 +489,45 @@ export const STAGES: Stage[] = [
   },
 ];
 
-/** Stages you can reach by accreting. The tail of the ladder arrives with the supernova. */
+/** Stages you can reach by accreting. The rest are what a star leaves, not what it grows into. */
 export const ACCRETION_STAGES: Stage[] = STAGES.filter((s) => s.threshold !== null);
+
+/** Index of the first star on the ladder: the moment there is something to keep. */
+export const IGNITION_STAGE = ACCRETION_STAGES.findIndex((s) => s.spectral !== undefined);
+
+/** Index of the last. */
+export const SUMMIT_STAGE = ACCRETION_STAGES.length - 1;
+
+/**
+ * Where the hottest class ends.
+ *
+ * Every other class ends where the next begins. This one has nothing above it, so its far
+ * edge has to be stated: around a hundred and fifty solar masses, past which a star blows
+ * its own envelope off faster than it can gather it.
+ */
+export const SEQUENCE_END = D(2e37);
+
+/** Ladder index of a stage, by id. Throws on an id the ladder does not have. */
+export function stageIndexById(id: string): number {
+  const index = STAGES.findIndex((s) => s.id === id);
+  if (index < 0) throw new Error(`No stage called "${id}"`);
+  return index;
+}
+
+/** 0 for M through 6 for O, or -1 for a stage that is not a star. */
+export function classIndexOf(stage: number): number {
+  return stage >= IGNITION_STAGE && stage <= SUMMIT_STAGE ? stage - IGNITION_STAGE : -1;
+}
+
+/** The ladder index of a spectral class, counted from M. */
+export function stageOfClass(classIndex: number): number {
+  return IGNITION_STAGE + Math.max(0, Math.min(SUMMIT_STAGE - IGNITION_STAGE, classIndex));
+}
+
+/** The mass at which a stage ends: where the next begins, or the end of the sequence. */
+export function ceilingMass(stage: number): Num {
+  return ACCRETION_STAGES[stage + 1]?.threshold ?? SEQUENCE_END;
+}
 
 export function stageAt(index: number): Stage {
   const stage = STAGES[Math.max(0, Math.min(STAGES.length - 1, index))];

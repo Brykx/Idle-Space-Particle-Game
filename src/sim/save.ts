@@ -1,9 +1,10 @@
-import { D } from './numbers';
+import { D, NOTATIONS, type Notation } from './numbers';
 import { SAVE_VERSION, cloneState, initialState, type GameState } from './state';
 import { REBASED_UPGRADE_IDS, UPGRADE_IDS } from './upgrades';
-import { STARDUST_IDS } from './prestige';
+import { STARDUST_IDS, type StarRecord } from './sky';
 import { stageIndexFor } from './stages';
 import { ACHIEVEMENTS } from './achievements';
+import { TRAITS, capOf, firstCloud, isCloud, type Cloud, type Trait } from './clouds';
 
 /**
  * Serialisation, migration, and the export string.
@@ -106,6 +107,57 @@ const MIGRATIONS: Record<number, (raw: SaveBlob) => SaveBlob> = {
       stardust: asDecimal(raw.stardust, '0').add(refund).toString(),
     };
   },
+
+  /**
+   * 4 -> 5: a run became one star, and the sky began to remember.
+   *
+   * The old Stardust is not the new Stardust. It was paid as a power of mass and ran into the
+   * millions; the new one is paid in orders of magnitude and a whole career is a couple of
+   * thousand. So it is re-denominated rather than carried: what was ever earned, on a log
+   * scale, capped. The old tree's cards no longer exist, so their levels are part of what is
+   * re-denominated rather than refunded separately — `stardustEver` already counts them.
+   *
+   * The run in progress carries on, condensing from the first cloud, which can make a Sun.
+   * A save that sat at the top of the old ladder overnight is far past what that cloud holds,
+   * so it is brought back to a finished Sun: that star is waiting to be let go. The old
+   * collapses become no stars. The sky records what you made, with dates, and inventing
+   * entries for it would make it a record of nothing.
+   */
+  4: (raw) => {
+    const ever = asDecimal(raw.stardustEver, '0').max(asDecimal(raw.stardust, '0'));
+    const pool = ever.gt(0) ? Math.min(400, Math.floor(40 * ever.add(1).log10())) : 0;
+
+    // A hair inside the line, so a finished star reads as finished whatever the rounding.
+    const finished = capOf(firstCloud()).mul(0.9995);
+    let totalMassEver = asDecimal(raw.totalMassEver, '0');
+    if (totalMassEver.gt(finished)) totalMassEver = finished;
+    let mass = asDecimal(raw.mass, '0');
+    if (mass.gt(totalMassEver)) mass = totalMassEver;
+
+    const stage = stageIndexFor(totalMassEver);
+    const settings = { ...((raw.settings ?? {}) as Record<string, unknown>) };
+    // Letters were the default, so a save holding them almost certainly never chose them.
+    if (settings.notation === undefined || settings.notation === 'letters') settings.notation = 'words';
+
+    const { collapses: _collapses, ...rest } = raw;
+    return {
+      ...rest,
+      version: 5,
+      mass: mass.toString(),
+      totalMassEver: totalMassEver.toString(),
+      stardust: pool,
+      stardustEver: pool,
+      stardustLevels: {},
+      cloud: firstCloud(),
+      runStartedAt: 0,
+      sky: [],
+      // The ladder moved under this save. Where it now stands is not news, but a class it
+      // has newly reached — the ladder is finer than it was — is worth announcing.
+      stageSeen: Math.min(Math.floor(asFiniteNumber(raw.stageSeen, stage)), stage),
+      rebasedStage: stage,
+      settings,
+    };
+  },
 };
 
 export function serialize(s: GameState): SaveBlob {
@@ -119,9 +171,12 @@ export function serialize(s: GameState): SaveBlob {
     levelsEver: { ...s.levelsEver },
     autoBuy: { ...s.autoBuy },
     achievements: [...s.achievements],
-    stardust: s.stardust.toString(),
-    stardustEver: s.stardustEver.toString(),
-    collapses: s.collapses,
+    cloud: s.cloud ? { ...s.cloud } : null,
+    runStartedAt: s.runStartedAt,
+    skySeed: s.skySeed,
+    sky: s.sky.map((star) => ({ ...star })),
+    stardust: s.stardust,
+    stardustEver: s.stardustEver,
     stardustLevels: { ...s.stardustLevels },
     playTime: s.playTime,
     stageSeen: s.stageSeen,
@@ -134,6 +189,37 @@ export function serialize(s: GameState): SaveBlob {
 
 function asFiniteNumber(v: unknown, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+
+/** A star from a save, or null if it is not one this build can draw and count. */
+function asStarRecord(v: unknown): StarRecord | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const r = v as Record<string, unknown>;
+  if (typeof r.name !== 'string' || typeof r.stage !== 'string' || typeof r.cloud !== 'string') return null;
+  const id = Math.floor(asFiniteNumber(r.id, 0));
+  if (id < 1) return null;
+  const unit = (x: unknown) => Math.min(1, Math.max(0, asFiniteNumber(x, 0.5)));
+  return {
+    id,
+    name: r.name.slice(0, 24) || r.cloud,
+    stage: r.stage,
+    orders: Math.max(0, asFiniteNumber(r.orders, 0)),
+    completed: r.completed === true,
+    stardust: Math.max(0, Math.floor(asFiniteNumber(r.stardust, 0))),
+    seconds: Math.max(0, asFiniteNumber(r.seconds, 0)),
+    releasedAt: asFiniteNumber(r.releasedAt, 0),
+    cloud: r.cloud,
+    hue: ((asFiniteNumber(r.hue, 214) % 360) + 360) % 360,
+    trait: (TRAITS as readonly string[]).includes(r.trait as string) ? (r.trait as Trait) : 'quiet',
+    x: unit(r.x),
+    y: unit(r.y),
+  };
+}
+
+/** Only the fields a cloud has, so a save cannot smuggle anything else into the state. */
+function asCloud(v: unknown): Cloud | null {
+  if (!isCloud(v)) return null;
+  return { seed: v.seed >>> 0, name: v.name, ceiling: v.ceiling, pace: v.pace, trait: v.trait, hue: v.hue };
 }
 
 function asDecimal(v: unknown, fallback: string) {
@@ -200,29 +286,41 @@ export function deserialize(raw: unknown, now = Date.now()): GameState {
   const stats = (blob.stats ?? {}) as Record<string, unknown>;
   const totalMassEver = asDecimal(blob.totalMassEver, '0');
 
+  const sky = Array.isArray(blob.sky)
+    ? blob.sky.map(asStarRecord).filter((star): star is StarRecord => star !== null)
+    : [];
+  // Null is a state — between stars, choosing the next — and is kept as one. Anything else
+  // that is not a cloud is a damaged save: a first star gets the first cloud back, and a
+  // later one is offered a choice rather than handed a cloud it never picked.
+  const cloud = blob.cloud === null ? null : (asCloud(blob.cloud) ?? (sky.length === 0 ? firstCloud() : null));
+  const stardust = Math.max(0, Math.floor(asFiniteNumber(Number(blob.stardust), 0)));
+  const playTime = Math.max(0, asFiniteNumber(blob.playTime, 0));
+
   return {
     ...base,
     mass: asDecimal(blob.mass, '0'),
     totalMassEver,
     energy: asDecimal(blob.energy, '0'),
     totalEnergyEver: asDecimal(blob.totalEnergyEver, '0'),
-    playTime: Math.max(0, asFiniteNumber(blob.playTime, 0)),
+    playTime,
     // A save written before stages existed should not announce a backlog of them on load.
     stageSeen: Math.max(0, Math.floor(asFiniteNumber(blob.stageSeen, stageIndexFor(totalMassEver)))),
     // Defaulting to the current stage, not to zero: a save that somehow lost this field
     // should not wipe the player's rebased levels on the next tick for no reason.
     rebasedStage: Math.max(0, Math.floor(asFiniteNumber(blob.rebasedStage, stageIndexFor(totalMassEver)))),
     achievements,
-    stardust: asDecimal(blob.stardust, '0'),
-    stardustEver: asDecimal(blob.stardustEver, '0'),
-    collapses: Math.max(0, Math.floor(asFiniteNumber(blob.collapses, 0))),
+    cloud,
+    runStartedAt: Math.min(playTime, Math.max(0, asFiniteNumber(blob.runStartedAt, 0))),
+    skySeed: Math.floor(asFiniteNumber(blob.skySeed, base.skySeed)) >>> 0,
+    sky,
+    stardust,
+    stardustEver: Math.max(stardust, Math.floor(asFiniteNumber(Number(blob.stardustEver), 0))),
     stardustLevels,
     lastSeen: asFiniteNumber(blob.lastSeen, now),
     settings: {
-      notation:
-        settings.notation === 'scientific' || settings.notation === 'engineering' || settings.notation === 'letters'
-          ? settings.notation
-          : base.settings.notation,
+      notation: NOTATIONS.includes(settings.notation as Notation)
+        ? (settings.notation as Notation)
+        : base.settings.notation,
       particleBudget: Math.min(20000, Math.max(0, asFiniteNumber(settings.particleBudget, base.settings.particleBudget))),
       reducedMotion: settings.reducedMotion === true,
       autoBuyReserve: Math.min(0.9, Math.max(0, asFiniteNumber(settings.autoBuyReserve, 0))),

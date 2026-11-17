@@ -11,15 +11,17 @@ async function seedSave(page: Page, fields: Record<string, unknown>): Promise<vo
   }, fields);
 }
 
-/** The readout is formatted ("3.60 K"), so tests cannot just call `Number()` on it. */
-const SUFFIXES: Record<string, number> = { K: 1e3, M: 1e6, B: 1e9, T: 1e12 };
+/** The readout is in words ("4.15 billion", "41,500"), so tests cannot just call `Number()` on it. */
+const WORDS: Record<string, number> = {
+  thousand: 1e3, million: 1e6, billion: 1e9, trillion: 1e12, quadrillion: 1e15, quintillion: 1e18,
+};
 
 async function readMass(page: Page): Promise<number> {
   const text = (await page.locator('.mass').innerText()).trim();
-  const match = /^(-?[\d.]+)\s*([A-Za-z]*)$/.exec(text);
+  const match = /^(-?[\d.,]+)\s*([a-z]*)$/.exec(text);
   if (!match) throw new Error(`Could not parse mass readout: "${text}"`);
-  const [, digits, suffix] = match;
-  return Number(digits) * (suffix ? (SUFFIXES[suffix] ?? Number.NaN) : 1);
+  const [, digits, word] = match;
+  return Number(digits!.replace(/,/g, '')) * (word ? (WORDS[word] ?? Number.NaN) : 1);
 }
 
 /**
@@ -214,7 +216,7 @@ test.describe('the game runs', () => {
     expect(await readMass(page)).toBeGreaterThan(massBefore + 3000);
   });
 
-  test('shows where you are on the ladder, and what a collapse is for', async ({ page }) => {
+  test('shows where you are on the ladder, and what lies past it', async ({ page }) => {
     await seedSave(page, { mass: '1e9', totalMassEver: '1e9' });
     await page.reload();
 
@@ -224,9 +226,9 @@ test.describe('the game runs', () => {
 
     await page.getByRole('button', { name: 'Progress' }).click();
     const rows = page.locator('.stages li');
-    await expect(rows).toHaveCount(14);
+    await expect(rows).toHaveCount(18);
 
-    // Everything up to Planet is behind you; the collapse stages never count as reached,
+    // Everything up to Planet is behind you; what a star leaves never counts as reached,
     // however heavy you get, because accretion cannot take you there.
     await expect(page.locator('.stages li.reached')).toHaveCount(7);
     await expect(page.locator('.stages li.current .name')).toHaveText('Planet');
@@ -346,64 +348,75 @@ test.describe('the game runs', () => {
     await expect(ladder.locator('.value')).toHaveText(/x[\d.]+/);
   });
 
-  test('collapses the star, and the run after it survives a reload', async ({ page }) => {
+  test('lets a star go, offers the next cloud, and survives a reload', async ({ page }) => {
     // The one flow in the game that deletes almost everything on purpose. If it is wrong it
     // is wrong in the worst possible way, so it is driven end to end rather than unit-tested
-    // and hoped for: arm, confirm, and then reload to prove the wreckage was written down.
+    // and hoped for: arm, confirm, choose, and then a fresh page to prove it was written down.
+    //
+    // Heavier than the first cloud holds, which the save migration turns into a finished Sun.
     await seedSave(page, {
-      mass: '5e21',
-      totalMassEver: '5e21',
+      mass: '9e21',
+      totalMassEver: '9e21',
       levels: { gravity: 80, radius: 60, density: 8, particleMass: 50, efficiency: 18 },
       levelsEver: { gravity: 80, radius: 60, density: 160, particleMass: 50, efficiency: 18 },
       rebasedStage: 11,
       stageSeen: 11,
     });
     await page.reload();
-    await expect(page.locator('.stage-name')).toHaveText('Supergiant');
+    await expect(page.locator('.stage-name')).toHaveText('Yellow Dwarf');
 
-    await page.getByRole('button', { name: 'Collapse' }).click();
-    await expect(page.locator('.offer .payout')).toContainText('stardust');
+    await page.getByRole('button', { name: 'Sky' }).click();
+    const current = page.getByTestId('current');
+    await expect(current).toContainText('The star is finished');
+    await expect(current).toContainText('stardust');
 
-    // Two clicks, and the second only appears after the first has said what it costs.
-    await expect(page.getByRole('button', { name: 'Collapse the star' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Collapse…' }).click();
-    await expect(page.locator('.offer .cost')).toContainText('lose');
-    await page.getByRole('button', { name: 'Collapse the star' }).click();
+    // Two steps, and the second only appears after the first has said what it costs.
+    await expect(page.getByTestId('release')).toHaveCount(0);
+    await page.getByTestId('arm-release').click();
+    await expect(current.locator('.cost')).toContainText('This run ends');
+    await page.getByTestId('release').click();
 
-    // Back at the bottom, with something to show for it.
+    // Between stars: the field is empty and the next cloud is a choice.
     await expect(page.locator('.stage-name')).toHaveText('Dust');
-    const stardust = await page.locator('.readouts .value').first().innerText();
-    expect(Number(stardust)).toBeGreaterThan(0);
+    await expect(page.getByTestId('choose')).toBeVisible();
+    await expect(page.getByTestId('offer')).toHaveCount(3);
+    await expect(page.locator('.readouts .value').nth(0)).toHaveText('91');
     await expect(page.locator('.readouts .value').nth(1)).toHaveText('1');
+    await expect(page.getByTestId('catalogue')).toContainText('Morning');
 
-    // Spend some of it, then come back in a fresh page: a collapse that is not on disk is a
-    // collapse that closing the tab undoes, which is the worst bug this screen could have.
-    await page.locator('.tree .card', { hasText: 'Enriched Nebula' }).locator('.buy').click();
-    await expect(page.locator('.tree .card', { hasText: 'Enriched Nebula' }).locator('.level')).toHaveText('Lv 1');
+    // Spend some of it, and begin the next star.
+    const enrichment = page.getByTestId('tree-card').filter({ hasText: 'Enrichment' });
+    await enrichment.locator('.buy').click();
+    await expect(enrichment.locator('.level')).toHaveText('1 / 8');
+
+    const chosen = (await page.getByTestId('offer').first().locator('.cloud-name').innerText()).trim();
+    await page.getByTestId('offer').first().click();
+    await expect(page.getByTestId('choose')).toHaveCount(0);
+    await expect(page.getByTestId('current')).toContainText(chosen);
 
     // A new page rather than a reload. `seedSave` installs an init script, and an init script
-    // runs on every navigation — reloading here would helpfully write the pre-collapse save
-    // back over the top and the test would be checking the fixture, not the game.
+    // runs on every navigation — reloading here would helpfully write the old save back over
+    // the top and the test would be checking the fixture, not the game.
     const returning = await page.context().newPage();
     await returning.goto('/');
-    await returning.getByRole('button', { name: 'Collapse' }).click();
+    await returning.getByRole('button', { name: 'Sky' }).click();
     await expect(returning.locator('.readouts .value').nth(1)).toHaveText('1');
-    await expect(returning.locator('.tree .card', { hasText: 'Enriched Nebula' }).locator('.level'))
-      .toHaveText('Lv 1');
-    await expect(returning.locator('.stage-name')).toHaveText('Dust');
+    await expect(returning.getByTestId('tree-card').filter({ hasText: 'Enrichment' }).locator('.level')).toHaveText('1 / 8');
+    await expect(returning.getByTestId('current')).toContainText(chosen);
+    await expect(returning.getByTestId('catalogue')).toContainText('Morning');
     await returning.close();
   });
 
-  // Every body kind the ladder can reach by mass. The last two stages, the neutron star and
-  // the black hole, carry no threshold — they arrive with the supernova in Phase 3 — so they
-  // are covered by `bodies.html` instead, which mounts the field on its own.
+  // Every body kind the ladder can reach by mass. The last two, the neutron star and the
+  // black hole, carry no threshold — they are what a star leaves, not what it grows into — so
+  // they are covered by `bodies.html` instead, which mounts the field on its own.
   const BODIES: Array<[string, string, string]> = [
     ['mote', '50', 'Dust'],
     ['rock', '5e3', 'Boulder'],
     ['world', '1e9', 'Planet'],
     ['gas', '1e11', 'Gas Giant'],
     ['ember', '1e13', 'Brown Dwarf'],
-    ['star', '1e18', 'Star'],
+    ['star', '1e18', 'Orange Dwarf'],
   ];
 
   for (const [kind, mass, label] of BODIES) {

@@ -1,5 +1,5 @@
 import { D, type Num } from './numbers';
-import { currentsFlowing, tick } from './economy';
+import { currentsFlowing, isRunning, tick } from './economy';
 import { stageIndexFor } from './stages';
 import type { GameState } from './state';
 
@@ -55,6 +55,8 @@ export interface AwayReport {
   /** Ladder stage when you left, and when you came back. */
   stageBefore: number;
   stageAfter: number;
+  /** The star finished while you were away: its cloud is spent and it is waiting for you. */
+  completed: boolean;
 }
 
 /**
@@ -77,10 +79,19 @@ export function applyOffline(s: GameState, now = Date.now()): AwayReport | null 
   // stat written afterwards would not be seen until the next one.
   s.stats.longestAway = Math.max(s.stats.longestAway, awaySeconds);
 
+  const wasRunning = isRunning(s);
   const finest = currentsFlowing(s) > 0 ? FINEST_STEP_SECONDS : STEP_SECONDS_HELD;
   const steps = Math.max(1, Math.min(MAX_STEPS, Math.ceil(creditedSeconds / finest)));
   const dt = creditedSeconds / steps;
-  for (let i = 0; i < steps; i++) tick(s, dt);
+  for (let i = 0; i < steps; i++) {
+    // Once the star has finished — or if there was none — the rest of the absence is only
+    // time, and one step says so as well as a hundred thousand.
+    if (!isRunning(s)) {
+      tick(s, (steps - i) * dt);
+      break;
+    }
+    tick(s, dt);
+  }
 
   if (awaySeconds < MIN_REPORTABLE_SECONDS) return null;
 
@@ -90,5 +101,6 @@ export function applyOffline(s: GameState, now = Date.now()): AwayReport | null 
     gained: s.totalMassEver.sub(before),
     stageBefore,
     stageAfter: stageIndexFor(s.totalMassEver),
+    completed: wasRunning && !isRunning(s),
   };
 }

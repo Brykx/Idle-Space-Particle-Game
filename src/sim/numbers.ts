@@ -16,7 +16,71 @@ export const D = (v: Decimal | number | string): Decimal => new Decimal(v);
 export const ZERO = D(0);
 export const ONE = D(1);
 
-export type Notation = 'scientific' | 'engineering' | 'letters';
+export type Notation = 'words' | 'scientific' | 'engineering' | 'letters';
+
+export const NOTATIONS: readonly Notation[] = ['words', 'letters', 'scientific', 'engineering'];
+
+/**
+ * Short-scale names, a thousand apart. Mass on the main sequence stops in the undecillions;
+ * the rest are here so a number never falls off the end of the list mid-run.
+ */
+const WORDS = [
+  '', 'thousand', 'million', 'billion', 'trillion', 'quadrillion', 'quintillion',
+  'sextillion', 'septillion', 'octillion', 'nonillion', 'decillion', 'undecillion',
+  'duodecillion', 'tredecillion', 'quattuordecillion', 'quindecillion', 'sexdecillion',
+  'septendecillion', 'octodecillion', 'novemdecillion', 'vigintillion',
+] as const;
+
+const SUPERSCRIPT = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+
+function superscript(n: number): string {
+  const digits = String(Math.abs(n))
+    .split('')
+    .map((d) => SUPERSCRIPT[Number(d)] ?? d)
+    .join('');
+  return n < 0 ? `⁻${digits}` : digits;
+}
+
+/** Three significant figures, without the zeros that only pretend to precision. */
+function threeFigures(v: number): string {
+  const text = v.toPrecision(3);
+  return text.includes('.') ? text.replace(/\.?0+$/, '') : text;
+}
+
+/**
+ * Numbers as words: `4.15 billion`, not `4.151 B`.
+ *
+ * Part of the interface receding. A suffix is a code you learn; a word is read without
+ * noticing. Below a million the digits are grouped and shown whole, because "41,500" is
+ * already easy to read and "41.5 thousand" is not how anyone says it.
+ */
+function formatWords(value: Num): string {
+  const n = value.toNumber();
+  if (value.lt(999_999.5)) {
+    if (value.lt(999.5)) return threeFigures(n);
+    return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  let tier = Math.floor(value.exponent / 3);
+  let shown = value.mantissa * Math.pow(10, value.exponent - tier * 3);
+  // 999.6 million rounds to "1000 million", which is a billion.
+  if (Number(shown.toPrecision(3)) >= 1000) {
+    tier += 1;
+    shown /= 1000;
+  }
+
+  const word = WORDS[tier];
+  if (word !== undefined) return `${threeFigures(shown)} ${word}`;
+
+  // Past the names, powers of ten — carrying a mantissa that rounds up to ten.
+  let mantissa = Number(value.mantissa.toFixed(2));
+  let exponent = value.exponent;
+  if (mantissa >= 10) {
+    mantissa /= 10;
+    exponent += 1;
+  }
+  return `${mantissa.toFixed(2)} × 10${superscript(exponent)}`;
+}
 
 /**
  * Standard idle-game suffixes. Beyond this list we fall back to scientific, which is where
@@ -43,6 +107,8 @@ export function format(value: Num, notation: Notation = 'scientific'): string {
   if (value.sign() < 0) return `-${format(value.neg(), notation)}`;
 
   const exp = value.exponent;
+
+  if (notation === 'words') return formatWords(value);
 
   // Below 1000 there is nothing to abbreviate; show it plainly.
   if (exp < 3) {

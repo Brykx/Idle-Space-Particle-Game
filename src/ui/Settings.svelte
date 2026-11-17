@@ -44,6 +44,7 @@
       value={view.notation}
       onchange={(event) => onnotation(event.currentTarget.value as Notation)}
     >
+      <option value="words">1.23 million</option>
       <option value="letters">1.23 M</option>
       <option value="scientific">1.230e6</option>
       <option value="engineering">1.23e6</option>
