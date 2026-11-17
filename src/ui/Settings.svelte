@@ -132,11 +132,6 @@
     <button class="wide" onclick={() => (confirmingReset = true)}>Hard reset</button>
   {/if}
 
-  <dl class="stats">
-    <div><dt>Time played</dt><dd class="num">{view.playTime}</dd></div>
-    <div><dt>Upgrades bought</dt><dd class="num">{view.purchases}</dd></div>
-    <div><dt>Achievements</dt><dd class="num">{view.achievementsUnlocked}/{view.achievementCount}</dd></div>
-  </dl>
 </section>
 
 <style>
@@ -258,26 +253,5 @@
     padding: 0.4rem 0.5rem;
     font-family: var(--mono);
     font-size: 0.68rem;
-  }
-
-  .stats {
-    margin: 0.9rem 0 0;
-    display: grid;
-    gap: 0.25rem;
-    font-size: 0.75rem;
-  }
-
-  .stats div {
-    display: flex;
-    justify-content: space-between;
-  }
-
-  dt {
-    color: var(--dimmer);
-  }
-
-  dd {
-    margin: 0;
-    color: var(--dim);
   }
 </style>

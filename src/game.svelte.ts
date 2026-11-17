@@ -1,11 +1,15 @@
 import { format, formatDuration, type Notation } from './sim/numbers';
 import {
   buy,
+  canAfford,
   currentsOpen,
   deriveRates,
+  isFlowing,
   isOpen,
   isUnlocked,
   nextCost,
+  paybackHorizon,
+  paybackSeconds,
   promotionMultiplier,
   tick,
 } from './sim/economy';
@@ -30,8 +34,9 @@ import {
   type StardustId,
 } from './sim/sky';
 import { TRAIT_DEFS, capOf, ceilingStageOf } from './sim/clouds';
-import { forecastCloud, forecastRemaining, roughly } from './sim/forecast';
+import { forecastCloud, forecastRun, roughly } from './sim/forecast';
 import { STAGES, stageAt, stageIndexById, stageIndexFor, stageOfClass, stageProgress, type Fate } from './sim/stages';
+import { COMPLETE_AT } from './sim/clouds';
 
 /** The neutron star: what a supernova leaves, and the only remnant drawn for now. */
 const REMNANT_STAGE = STAGES.findIndex((stage) => stage.look.body === 'remnant');
@@ -50,6 +55,27 @@ const FATE_WORDS: Record<Fate, string> = {
 
 /** CSS colour for a packed RGB number. */
 const css = (rgb: number) => `#${rgb.toString(16).padStart(6, '0')}`;
+
+/**
+ * The interface's one colour, taken from whatever is in the middle of the screen.
+ *
+ * Lifted towards white until it reads against the dark: a boulder's grey-brown is the right
+ * hue for the accent and much too dim to be one.
+ */
+function accentOf(rgb: number): string {
+  let r = (rgb >> 16) & 255;
+  let g = (rgb >> 8) & 255;
+  let b = rgb & 255;
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  const want = 0.72;
+  if (luminance < want) {
+    const t = (want - luminance) / (1 - luminance);
+    r = Math.round(r + (255 - r) * t);
+    g = Math.round(g + (255 - g) * t);
+    b = Math.round(b + (255 - b) * t);
+  }
+  return `rgb(${r}, ${g}, ${b})`;
+}
 import { deserialize, exportSave as exportSaveString, importSave, serialize } from './sim/save';
 import { clearSave, readSave, writeSave } from './storage';
 import { createField, type FieldHandle } from './render/Field';
@@ -104,6 +130,16 @@ export interface UpgradeView {
   autoBuy: boolean;
   /** Begun by hand at least once, so it can flow. */
   open: boolean;
+  /**
+   * Where the current stands:
+   * - `closed`: never begun. One purchase by hand opens it.
+   * - `flowing`: growing by itself.
+   * - `settled`: flowing, but a level would not repay itself soon enough, so it is left alone.
+   * - `held`: held back by the player, to be tended by hand.
+   */
+  state: 'closed' | 'flowing' | 'settled' | 'held';
+  /** Closed, and the first level can be afforded now. */
+  canBegin: boolean;
   /** Resets to zero at every promotion, and is repriced to the new stage. */
   rebased: boolean;
   currency: 'mass' | 'energy';
@@ -188,8 +224,18 @@ export interface StageRowView {
 }
 
 export interface View {
+  /** Mass in words. Repainted once a second: a number that changes faster is a clock to watch. */
   mass: string;
   massPerSecond: string;
+
+  /** The interface's one colour, taken from the body in the middle of the screen. */
+  accent: string;
+  /** 0..1 along the caption's hairline: towards the next stage, or towards the cloud's end. */
+  hairline: number;
+  /** The caption's second line: what comes next, and roughly when. */
+  captionNext: string;
+  /** A current that can be begun right now, offered in the caption. Null when there is none. */
+  beginnable: { id: UpgradeId; name: string; cost: string } | null;
 
   stageName: string;
   stageAnalogue: string;
@@ -294,6 +340,10 @@ function emptyView(): View {
   return {
     mass: '0',
     massPerSecond: '0',
+    accent: 'rgb(200, 210, 230)',
+    hairline: 0,
+    captionNext: '',
+    beginnable: null,
     stageName: '',
     stageAnalogue: '',
     stageFraction: 0,
@@ -373,7 +423,9 @@ function createGame() {
   /** `playTime` until which the field shows what the last star left, not the new run. */
   let releasingUntil = 0;
   /** Forecasts are a simulation, so they are kept and refreshed rather than redone per frame. */
-  let etaCache = { key: '', at: -Infinity, value: '' };
+  let etaCache = { key: '', at: -Infinity, finished: '', nextStage: '' };
+  /** Wall-clock ms the caption's mass was last repainted. */
+  let massPaintedAt = 0;
   let offersCache: { key: string; views: CloudView[] } = { key: '', views: [] };
   let uiTimer = 0;
   let fieldTimer = 0;
@@ -459,14 +511,19 @@ function createGame() {
    * Roughly when this star will be finished. Re-forecast every half minute of play, or when
    * something the forecast depends on changes; a word does not need refreshing per frame.
    */
-  function runEta(): string {
-    if (!state.cloud) return '';
-    const key = `${state.sky.length}|${state.cloud.seed}|${Object.values(state.stardustLevels).join(',')}`;
+  function runEta(): { finished: string; nextStage: string } {
+    if (!state.cloud) return { finished: '', nextStage: '' };
+    const key = `${state.sky.length}|${state.cloud.seed}|${stageIndexFor(state.totalMassEver)}|${Object.values(state.stardustLevels).join(',')}`;
     if (key !== etaCache.key || state.playTime - etaCache.at > 30) {
-      const seconds = forecastRemaining(state);
-      etaCache = { key, at: state.playTime, value: seconds > 0 ? roughly(seconds) : '' };
+      const forecast = forecastRun(state);
+      etaCache = {
+        key,
+        at: state.playTime,
+        finished: forecast.finished > 0 ? roughly(forecast.finished) : '',
+        nextStage: forecast.nextStage !== null ? roughly(forecast.nextStage) : '',
+      };
     }
-    return etaCache.value;
+    return etaCache;
   }
 
   /** The clouds on offer, each with a forecast. Computed once per choice, not per frame. */
@@ -502,7 +559,11 @@ function createGame() {
     const rates = deriveRates(state);
     const notation = state.settings.notation;
 
-    view.mass = format(state.mass, notation);
+    const now = Date.now();
+    if (now - massPaintedAt >= 1000 || view.mass === '0') {
+      view.mass = format(state.mass, notation);
+      massPaintedAt = now;
+    }
     view.massPerSecond = format(rates.massPerSecond, notation);
 
     const progress = stageProgress(state.totalMassEver);
@@ -530,8 +591,30 @@ function createGame() {
     view.cloudHue = cloud?.hue ?? view.cloudHue;
     view.remaining = rates.remaining;
     view.complete = rates.complete;
-    view.eta = runEta();
+    const eta = runEta();
+    view.eta = eta.finished;
     view.offers = offerViews();
+
+    // The caption: one line about what comes next, in words.
+    view.accent = accentOf(stageAt(progress.index).look.core);
+    if (!cloud) {
+      view.captionNext = 'Between stars. Choose the next cloud when you like.';
+      view.hairline = 0;
+    } else if (rates.complete) {
+      view.captionNext = 'Its cloud is spent. Let it go when you like.';
+      view.hairline = 1;
+    } else if (next) {
+      view.captionNext = eta.nextStage ? `${next.name} ${eta.nextStage}` : next.name;
+      view.hairline = progress.fraction;
+    } else {
+      // At the cloud's ceiling, the hairline measures the cloud running out, in orders.
+      const from = stageAt(progress.index).threshold;
+      const to = capOf(cloud).mul(COMPLETE_AT);
+      const span = from && from.gt(0) ? to.log10() - from.log10() : 1;
+      const here = from && from.gt(0) ? state.totalMassEver.log10() - from.log10() : 0;
+      view.hairline = span > 0 ? Math.max(0, Math.min(1, here / span)) : 1;
+      view.captionNext = eta.finished ? `Finished ${eta.finished}` : 'Finishing';
+    }
 
     // --- letting go ----------------------------------------------------------------------
     view.canRelease = canRelease(state);
@@ -647,6 +730,20 @@ function createGame() {
       const gainLabel =
         def.term === 'energy' ? 'throughput' : def.term === 'requirement' ? 'cheaper to hold' : 'income';
 
+      const open = isOpen(state, def.id);
+      const settled =
+        open &&
+        isFlowing(state, def.id) &&
+        def.currency === 'mass' &&
+        paybackSeconds(state, def.id, rates) > paybackHorizon(state, rates);
+      const status: UpgradeView['state'] = !open
+        ? 'closed'
+        : !state.autoBuy[def.id]
+          ? 'held'
+          : settled
+            ? 'settled'
+            : 'flowing';
+
       return {
         id: def.id,
         name: def.name,
@@ -658,10 +755,12 @@ function createGame() {
         affordable,
         maxLevels: best.levels,
         maxCost: format(best.cost, notation),
-        eta: affordable ? '' : formatDuration(seconds),
+        eta: affordable ? '' : roughly(seconds),
         gain: `+${(gainFraction * 100).toFixed(gainFraction < 0.01 ? 2 : 1)}% ${gainLabel}`,
         autoBuy: state.autoBuy[def.id],
-        open: isOpen(state, def.id),
+        open,
+        state: status,
+        canBegin: !open && affordable,
         rebased: def.rebased === true,
         currency: def.currency,
       };
@@ -670,6 +769,11 @@ function createGame() {
     const visible = UPGRADE_LIST.filter((def) => isUnlocked(state, def));
     view.upgrades = visible.filter((def) => def.term !== 'energy' && def.term !== 'requirement').map(buildRow);
     view.energyUpgrades = visible.filter((def) => def.term === 'energy' || def.term === 'requirement').map(buildRow);
+
+    // The one thing the game asks of a first run: begin each current once. Offered in the
+    // caption only when it can actually be done, so it is an invitation and never a nag.
+    const begin = cloud ? UPGRADE_LIST.find((def) => isUnlocked(state, def) && !isOpen(state, def.id) && canAfford(state, def.id)) : undefined;
+    view.beginnable = begin ? { id: begin.id, name: begin.name, cost: format(nextCost(state, begin.id), notation) } : null;
 
     // --- the energy economy ---------------------------------------------------------
     view.energyUnlocked = rates.energyPerSecond.gt(0);

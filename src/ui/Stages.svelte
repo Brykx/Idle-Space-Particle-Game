@@ -5,9 +5,9 @@
 </script>
 
 <!--
-  The whole ladder, including the two stages accretion cannot reach. Showing those greyed is
-  the point: a supernova is the only way past a star, and the list should say so long before
-  the player gets there.
+  The whole ladder, including the two bodies accretion cannot reach. Showing those greyed is
+  the point: they are what a star leaves, not what it grows into, and the list should say so
+  long before the player gets there.
 -->
 <section class="stages">
   <h2>The ladder</h2>
@@ -24,9 +24,9 @@
   </ol>
 
   <p class="note">
-    Everything up to Supergiant is accretion — you get there by getting heavier. The last two
-    are not: a star does not grow into a neutron star, it runs out of fuel and throws most of
-    itself away. That collapse arrives with the supernova.
+    Everything up to Blue Supergiant is accretion: you get there by getting heavier, as far as
+    your cloud allows. The last two are not. A star does not grow into a neutron star; it is
+    what a heavy star leaves when it is let go.
   </p>
 </section>
 

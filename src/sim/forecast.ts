@@ -1,5 +1,6 @@
 import { buy, canAfford, deriveRates, isOpen, isRunning, tick, unlockedUpgrades } from './economy';
 import { cloneState, type GameState } from './state';
+import { stageIndexFor } from './stages';
 import type { Cloud } from './clouds';
 
 /**
@@ -24,11 +25,25 @@ const STEPS_PER_TENFOLD = 40;
 /** The longest a forecast will look ahead. */
 const HORIZON_SECONDS = 30 * 86400;
 
+export interface Forecast {
+  /** Seconds until the next promotion, or null if this cloud has none left to give. */
+  nextStage: number | null;
+  /** Seconds until the cloud is spent and the star finished. Infinity past the horizon. */
+  finished: number;
+}
+
 /** Seconds until the star in `s` is finished, or Infinity past the horizon. */
 export function forecastRemaining(s: GameState): number {
-  if (!isRunning(s)) return 0;
+  return forecastRun(s).finished;
+}
+
+/** When the next promotion lands and when the star is finished, from one simulation. */
+export function forecastRun(s: GameState): Forecast {
+  if (!isRunning(s)) return { nextStage: null, finished: 0 };
   const copy = cloneState(s);
   const started = copy.playTime;
+  const stageAtStart = stageIndexFor(copy.totalMassEver);
+  let nextStage: number | null = null;
 
   for (let i = 0; i < MAX_STEPS && isRunning(copy); i++) {
     // A forecast assumes what the game assumes: a current is begun when it can be. The first
@@ -43,10 +58,11 @@ export function forecastRemaining(s: GameState): number {
         : 0;
     const dt = Math.min(3600, Math.max(0.5, tenfold / STEPS_PER_TENFOLD));
     tick(copy, dt);
-    if (copy.playTime - started > HORIZON_SECONDS) return Infinity;
+    if (nextStage === null && stageIndexFor(copy.totalMassEver) > stageAtStart) nextStage = copy.playTime - started;
+    if (copy.playTime - started > HORIZON_SECONDS) return { nextStage, finished: Infinity };
   }
 
-  return isRunning(copy) ? Infinity : copy.playTime - started;
+  return { nextStage, finished: isRunning(copy) ? Infinity : copy.playTime - started };
 }
 
 /** Seconds a whole star would take from this cloud, starting from where `s` stands now. */

@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { game } from '../game.svelte';
-  import UpgradeCard from './UpgradeCard.svelte';
+  import Caption from './Caption.svelte';
+  import Whisper from './Whisper.svelte';
+  import Current from './Current.svelte';
   import Breakdown from './Breakdown.svelte';
   import Sky from './Sky.svelte';
-  import Stages from './Stages.svelte';
-  import Achievements from './Achievements.svelte';
+  import Journal from './Journal.svelte';
   import Elements from './Elements.svelte';
   import Settings from './Settings.svelte';
   import AwayDialog from './AwayDialog.svelte';
@@ -14,156 +15,186 @@
 
   let stage: HTMLDivElement;
 
-  type Tab = 'core' | 'energy' | 'sky' | 'progress' | 'settings';
-  let tab = $state<Tab>('core');
+  type Tab = 'system' | 'energy' | 'sky' | 'journal' | 'settings';
+  let tab = $state<Tab>('system');
+  let sheetOpen = $state(false);
 
-  // The Energy tab only exists once there is a disk. Keeping it out of the bar until then is
-  // the difference between a game that unfolds and one that starts with four empty rooms.
-  // The Sky tab appears once the core is a star and can be let go, and never leaves again,
-  // because after the first star it holds the sky and the tree. Before that, a tab offering
-  // an ending to a run you have not finished is only a spoiler.
+  // Pages appear as they start to mean something. Energy once there is a disk; the sky once
+  // the core is a star that could be let go, and from then on for good, because after the
+  // first star it holds the sky and the tree. Before that, a page offering an ending to a run
+  // you have not finished is only a spoiler.
   const tabs = $derived(
     [
-      { id: 'core' as const, label: 'Core' },
+      { id: 'system' as const, label: 'System' },
       ...(view.energyUnlocked ? [{ id: 'energy' as const, label: 'Energy' }] : []),
       ...(view.canRelease || view.choosing || view.sky.length > 0 ? [{ id: 'sky' as const, label: 'Sky' }] : []),
-      { id: 'progress' as const, label: 'Progress' },
+      { id: 'journal' as const, label: 'Journal' },
       { id: 'settings' as const, label: 'Settings' },
     ],
   );
 
+  function openSheet(at?: Tab): void {
+    if (at) tab = at;
+    sheetOpen = true;
+  }
+
+  // The interface dims when you stop moving, and comes back the moment you do. The field is
+  // the thing to look at; the words are there when you want them.
+  let idle = $state(false);
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const IDLE_AFTER_MS = 9000;
+
+  function wake(): void {
+    idle = false;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => (idle = true), IDLE_AFTER_MS);
+  }
+
+  function onKey(event: KeyboardEvent): void {
+    wake();
+    if (event.key === 'Escape' && sheetOpen) sheetOpen = false;
+  }
+
   onMount(() => {
     void game.start(stage);
-    return () => game.stop();
+    wake();
+    return () => {
+      clearTimeout(idleTimer);
+      game.stop();
+    };
   });
 </script>
 
-<main>
-  <section class="stage">
-    <!-- The field is decorative: it renders the numbers, it never produces them. -->
-    <div class="field" bind:this={stage} aria-hidden="true"></div>
+<svelte:window onpointermove={wake} onpointerdown={wake} onkeydown={onKey} />
 
-    <div class="readout">
-      <p class="mass num">{view.mass}</p>
-      <p class="rate num">+{view.massPerSecond} <span>mass/s</span></p>
-    </div>
+<main
+  class="app"
+  class:idle={idle && !sheetOpen}
+  class:still={view.reducedMotion}
+  style="--accent: {view.accent}"
+>
+  <!-- The field is the whole screen. It renders the numbers; it never produces them. Touching
+       it stirs it, which pays nothing, and closes the sheet if one is open. -->
+  <div
+    class="field"
+    bind:this={stage}
+    aria-hidden="true"
+    onpointerdown={() => {
+      if (sheetOpen) sheetOpen = false;
+    }}
+  ></div>
 
-    {#if view.announceTitle}
-      <div class="announce" role="status">
-        <p class="eyebrow">{view.announceEyebrow}</p>
-        <p class="title">{view.announceTitle}</p>
-        <p class="body">{view.announceBody}</p>
-      </div>
-    {/if}
+  <Whisper {view} />
 
-    {#if view.message}
-      <p class="message" role="status">{view.message}</p>
-    {/if}
-  </section>
+  {#if view.message}
+    <p class="message" role="status">{view.message}</p>
+  {/if}
 
-  <aside>
+  <Caption {view} {game} onopen={openSheet} />
+
+  {#if !sheetOpen}
+    <button class="summon" aria-label="Open the sheet" aria-expanded="false" onclick={() => openSheet()}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 12h14M5 16h9" /></svg>
+    </button>
+  {/if}
+
+  <div class="sheet" class:open={sheetOpen} data-testid="sheet" inert={!sheetOpen} aria-hidden={!sheetOpen}>
     <header>
-      <h1>Idle Space Particle Game</h1>
-
-      <p class="stage">
-        <span class="stage-name">{view.stageName}</span>
-        <span class="stage-analogue">≈ {view.stageAnalogue}</span>
-      </p>
-
-      <div
-        class="progress"
-        title={view.nextStageName ? `Towards ${view.nextStageName}` : 'Top of the accretion ladder'}
-      >
-        <div class="bar" style="width: {(view.stageFraction * 100).toFixed(2)}%"></div>
-      </div>
-
-      <p class="goal">
-        {#if view.nextStageName}
-          next: {view.nextStageName} at {view.nextStageThreshold}
-          <!-- What the climb is worth, stated before you make it. -->
-          {#if view.nextPromotion}<span class="pays">pays {view.nextPromotion}</span>{/if}
-        {:else}
-          As large as this cloud can make you
-        {/if}
-      </p>
+      <nav class="tabs" aria-label="Sections">
+        {#each tabs as entry (entry.id)}
+          <button class:active={tab === entry.id} aria-current={tab === entry.id ? 'page' : undefined} onclick={() => (tab = entry.id)}>
+            {entry.label}
+          </button>
+        {/each}
+      </nav>
+      <button class="close" aria-label="Close the sheet" onclick={() => (sheetOpen = false)}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>
+      </button>
     </header>
 
-    <nav class="tabs" aria-label="Sections">
-      {#each tabs as entry (entry.id)}
-        <button class:active={tab === entry.id} onclick={() => (tab = entry.id)}>
-          {entry.label}
-          {#if entry.id === 'energy' && view.nextElementName}
-            <span class="pip" aria-hidden="true"></span>
-          {/if}
-        </button>
-      {/each}
-    </nav>
+    <div class="page">
+      {#if tab === 'system'}
+        <section class="where">
+          <p class="where-stage">
+            <span class="sheet-stage">{view.choosing ? 'Between stars' : view.stageName}</span>
+            {#if !view.choosing}<span class="stage-analogue">≈ {view.stageAnalogue}</span>{/if}
+          </p>
+          <div class="progress" aria-hidden="true">
+            <div class="bar" style="width: {(view.stageFraction * 100).toFixed(2)}%"></div>
+          </div>
+          <p class="goal">
+            {#if view.nextStageName}
+              next: {view.nextStageName} at {view.nextStageThreshold}
+              <!-- What the climb is worth, stated before you make it. -->
+              {#if view.nextPromotion}<span class="pays">pays {view.nextPromotion}</span>{/if}
+            {:else if view.choosing}
+              Choose the next cloud on the Sky page.
+            {:else}
+              As large as this cloud can make you
+            {/if}
+          </p>
+        </section>
 
-    {#if tab === 'core'}
-      <div class="upgrades">
-        {#each view.upgrades as upgrade (upgrade.id)}
-          <UpgradeCard {upgrade} onbuy={game.buy} onautobuy={game.toggleAutoBuy} />
-        {/each}
-      </div>
-
-      <Breakdown {view} />
-    {:else if tab === 'energy'}
-      <div class="readouts">
-        <div>
-          <p class="label">Energy</p>
-          <p class="value num">{view.energy}</p>
+        <h2>Currents</h2>
+        <div class="currents">
+          {#each view.upgrades as upgrade (upgrade.id)}
+            <Current {upgrade} onbuy={game.buy} onautobuy={game.toggleAutoBuy} />
+          {/each}
         </div>
-        <div>
-          <p class="label">Per second</p>
-          <p class="value num">+{view.energyPerSecond}</p>
-        </div>
-        <div>
-          <p class="label">Throughput</p>
-          <p class="value num">{view.throughput}</p>
-        </div>
-      </div>
 
-      <Elements {view} />
+        <Breakdown {view} />
+      {:else if tab === 'energy'}
+        <div class="readouts">
+          <div>
+            <p class="label">Energy</p>
+            <p class="value num">{view.energy}</p>
+          </div>
+          <div>
+            <p class="label">Per second</p>
+            <p class="value num">+{view.energyPerSecond}</p>
+          </div>
+          <div>
+            <p class="label">Throughput</p>
+            <p class="value num">{view.throughput}</p>
+          </div>
+        </div>
 
-      <div class="upgrades">
-        {#each view.energyUpgrades as upgrade (upgrade.id)}
-          <UpgradeCard {upgrade} onbuy={game.buy} onautobuy={game.toggleAutoBuy} />
-        {/each}
-      </div>
-    {:else if tab === 'sky'}
-      <Sky {view} {game} />
-    {:else if tab === 'progress'}
-      <Stages {view} />
-      <Achievements {view} />
-    {:else}
-      <Settings
-        {view}
-        onnotation={game.setNotation}
-        onbudget={game.setParticleBudget}
-        onreserve={game.setAutoBuyReserve}
-        onreducedmotion={game.setReducedMotion}
-        onexport={game.exportSave}
-        onimport={game.importSave}
-        onreset={game.hardReset}
-      />
-    {/if}
-  </aside>
+        <Elements {view} />
+
+        <h2>Currents</h2>
+        <div class="currents">
+          {#each view.energyUpgrades as upgrade (upgrade.id)}
+            <Current {upgrade} onbuy={game.buy} onautobuy={game.toggleAutoBuy} />
+          {/each}
+        </div>
+      {:else if tab === 'sky'}
+        <Sky {view} {game} />
+      {:else if tab === 'journal'}
+        <Journal {view} />
+      {:else}
+        <Settings
+          {view}
+          onnotation={game.setNotation}
+          onbudget={game.setParticleBudget}
+          onreserve={game.setAutoBuyReserve}
+          onreducedmotion={game.setReducedMotion}
+          onexport={game.exportSave}
+          onimport={game.importSave}
+          onreset={game.hardReset}
+        />
+      {/if}
+    </div>
+  </div>
 </main>
 
 <AwayDialog {view} ondismiss={game.dismissAway} />
 
 <style>
-  main {
-    display: grid;
-    grid-template-columns: 1fr minmax(19rem, 23rem);
-    height: 100%;
-    background: radial-gradient(ellipse at center, #0a1024 0%, #04050d 62%, #02030a 100%);
-  }
-
-  .stage {
+  .app {
     position: relative;
+    height: 100%;
     overflow: hidden;
-    min-height: 0;
+    background: radial-gradient(ellipse at center, #070b1a 0%, #03040b 64%, #02030a 100%);
   }
 
   .field {
@@ -171,95 +202,57 @@
     inset: 0;
   }
 
-  .readout {
-    position: absolute;
-    top: 1.4rem;
-    left: 50%;
-    transform: translateX(-50%);
-    text-align: center;
-    pointer-events: none;
-    text-shadow: 0 0 24px rgba(4, 8, 20, 0.9);
+  /* Everything that is not the field recedes when you stop moving. */
+  .app :global(.caption),
+  .summon {
+    transition: opacity 2.4s ease;
   }
 
-  .mass {
-    margin: 0;
-    font-size: clamp(1.8rem, 4.2vw, 2.9rem);
-    font-weight: 300;
-    letter-spacing: -0.02em;
+  .app.idle :global(.caption),
+  .app.idle .summon {
+    opacity: 0.28;
   }
 
-  .rate {
-    margin: 0.15rem 0 0;
-    font-size: 0.9rem;
-    color: var(--accent);
-  }
-
-  .rate span {
-    color: var(--dimmer);
-    font-size: 0.75rem;
-  }
-
-  .announce {
-    position: absolute;
-    top: 7.5rem;
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(22rem, 80%);
-    text-align: center;
-    padding: 0.75rem 1rem 0.85rem;
-    border: 1px solid var(--line-strong);
-    border-radius: 10px;
-    background: rgba(8, 12, 24, 0.82);
+  .summon,
+  .close {
+    display: grid;
+    place-items: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(200, 215, 255, 0.16);
+    background: rgba(6, 9, 20, 0.45);
     backdrop-filter: blur(6px);
-    animation: rise 420ms ease-out;
   }
 
-  @keyframes rise {
-    from {
-      opacity: 0;
-      transform: translate(-50%, 0.5rem);
-    }
-    to {
-      opacity: 1;
-      transform: translate(-50%, 0);
-    }
+  .summon {
+    position: absolute;
+    top: max(1.2rem, env(safe-area-inset-top));
+    right: max(1.2rem, env(safe-area-inset-right));
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .announce {
-      animation: none;
-    }
+  .summon:hover,
+  .close:hover {
+    border-color: var(--accent);
   }
 
-  .announce .eyebrow {
-    margin: 0;
-    font-size: 0.65rem;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--dimmer);
-  }
-
-  .announce .title {
-    margin: 0.15rem 0 0.35rem;
-    font-size: 1.15rem;
-    font-weight: 600;
-    color: var(--warm);
-  }
-
-  .announce .body {
-    margin: 0;
-    font-size: 0.75rem;
-    line-height: 1.5;
-    color: var(--dim);
+  svg {
+    width: 1.1rem;
+    height: 1.1rem;
+    fill: none;
+    stroke: var(--text);
+    stroke-width: 1.4;
+    stroke-linecap: round;
   }
 
   .message {
     position: absolute;
-    top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%);
+    bottom: 50%;
+    transform: translate(-50%, 50%);
     margin: 0;
-    max-width: 22rem;
+    max-width: min(24rem, calc(100vw - 2rem));
     text-align: center;
     font-size: 0.8rem;
     line-height: 1.5;
@@ -270,111 +263,65 @@
     padding: 0.7rem 0.9rem;
   }
 
-  aside {
+  /* --- the sheet ------------------------------------------------------------------- */
+
+  .sheet {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(25rem, 100vw);
     display: flex;
     flex-direction: column;
-    gap: 0.7rem;
-    padding: 1rem 0.9rem 1.2rem;
-    overflow-y: auto;
+    background: rgba(9, 12, 25, 0.86);
+    backdrop-filter: blur(14px);
     border-left: 1px solid var(--line);
-    background: var(--panel);
-    backdrop-filter: blur(10px);
+    box-shadow: -20px 0 50px rgba(0, 0, 0, 0.35);
+    transform: translateX(102%);
+    visibility: hidden;
+    transition:
+      transform 520ms cubic-bezier(0.22, 0.8, 0.3, 1),
+      visibility 0s linear 520ms;
   }
 
-  /* The stage is the thing you check most; it should not scroll away. */
-  aside header {
-    position: sticky;
-    top: -1rem;
-    z-index: 1;
-    margin: -1rem -0.9rem 0.2rem;
-    padding: 1rem 0.9rem 0.6rem;
-    background: rgba(11, 16, 32, 0.97);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid var(--line);
-    box-shadow: 0 10px 14px -12px rgba(0, 0, 0, 0.8);
+  .sheet.open {
+    transform: none;
+    visibility: visible;
+    transition:
+      transform 520ms cubic-bezier(0.22, 0.8, 0.3, 1),
+      visibility 0s;
   }
 
-  h1 {
-    margin: 0 0 0.5rem;
-    font-size: 0.82rem;
-    font-weight: 600;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--dim);
+  .app.still .sheet,
+  .app.still .sheet.open {
+    transition: none;
   }
 
-  .stage {
+  .sheet header {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.6rem;
-    margin: 0 0 0.45rem;
-  }
-
-  .stage-name {
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--warm);
-  }
-
-  .stage-analogue {
-    font-size: 0.68rem;
-    color: var(--dimmer);
-    text-align: right;
-  }
-
-  .progress {
-    height: 3px;
-    border-radius: 2px;
-    background: rgba(140, 175, 255, 0.12);
-    overflow: hidden;
-  }
-
-  .bar {
-    height: 100%;
-    background: linear-gradient(90deg, var(--accent), var(--warm));
-    transition: width 220ms ease;
-  }
-
-  .pays {
-    margin-left: 0.4rem;
-    padding: 0 0.3rem;
-    border: 1px solid currentColor;
-    border-radius: 999px;
-    font-size: 0.68rem;
-    opacity: 0.8;
-  }
-
-  .goal {
-    margin: 0.35rem 0 0;
-    font-size: 0.7rem;
-    color: var(--dimmer);
-  }
-
-  .upgrades {
-    display: grid;
+    align-items: center;
     gap: 0.5rem;
+    padding: max(0.9rem, env(safe-area-inset-top)) 0.9rem 0.6rem;
+    border-bottom: 1px solid var(--line);
   }
 
   .tabs {
+    flex: 1;
     display: flex;
-    gap: 0.25rem;
-    padding: 0.2rem;
-    border: 1px solid var(--line);
-    border-radius: 9px;
-    background: rgba(6, 9, 20, 0.6);
+    gap: 0.15rem;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
   .tabs button {
-    position: relative;
-    flex: 1;
-    padding: 0.35rem 0.4rem;
+    flex: 0 0 auto;
+    padding: 0.35rem 0.55rem;
     border: none;
-    border-radius: 7px;
+    border-radius: 999px;
     background: transparent;
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     color: var(--dimmer);
-    transition: background 120ms ease, color 120ms ease;
+    transition: color 160ms ease, background 160ms ease;
   }
 
   .tabs button:hover {
@@ -382,31 +329,87 @@
   }
 
   .tabs button.active {
-    background: rgba(48, 70, 122, 0.55);
     color: var(--text);
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: inset 0 -1px 0 var(--accent);
   }
 
-  .pip {
-    position: absolute;
-    top: 0.3rem;
-    right: 0.35rem;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--warm);
+  .close {
+    flex: 0 0 auto;
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .page {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.9rem 1rem max(1.4rem, env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+  }
+
+  h2 {
+    margin: 0.3rem 0 -0.4rem;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dimmer);
+  }
+
+  .where-stage {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin: 0 0 0.45rem;
+  }
+
+  .sheet-stage {
+    font-size: 1.05rem;
+    color: var(--accent);
+  }
+
+  .stage-analogue {
+    font-size: 0.7rem;
+    color: var(--dimmer);
+    text-align: right;
+  }
+
+  .progress {
+    height: 2px;
+    background: rgba(200, 215, 255, 0.12);
+  }
+
+  .bar {
+    height: 100%;
+    background: var(--accent);
+    transition: width 600ms ease;
+  }
+
+  .goal {
+    margin: 0.4rem 0 0;
+    font-size: 0.72rem;
+    color: var(--dimmer);
+  }
+
+  .pays {
+    margin-left: 0.4rem;
+    padding: 0 0.35rem;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-size: 0.66rem;
+  }
+
+  .currents {
+    display: grid;
   }
 
   .readouts {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 0.5rem;
-  }
-
-  .readouts div {
-    border: 1px solid var(--line);
-    border-radius: 9px;
-    background: rgba(9, 13, 26, 0.5);
-    padding: 0.5rem 0.55rem;
   }
 
   .readouts .label {
@@ -418,20 +421,27 @@
   }
 
   .readouts .value {
-    margin: 0.2rem 0 0;
-    font-size: 0.85rem;
-    color: var(--warm);
+    margin: 0.15rem 0 0;
+    font-size: 0.95rem;
   }
 
-  @media (max-width: 760px) {
-    main {
-      grid-template-columns: 1fr;
-      grid-template-rows: minmax(15rem, 45vh) 1fr;
-    }
+  /* --- a phone: the sheet comes up from the bottom ----------------------------------- */
 
-    aside {
+  @media (max-width: 720px) {
+    .sheet {
+      top: auto;
+      left: 0;
+      width: 100%;
+      height: min(78vh, 44rem);
       border-left: none;
       border-top: 1px solid var(--line);
+      border-radius: 18px 18px 0 0;
+      box-shadow: 0 -20px 50px rgba(0, 0, 0, 0.4);
+      transform: translateY(102%);
+    }
+
+    .sheet header {
+      padding-top: 0.8rem;
     }
   }
 </style>

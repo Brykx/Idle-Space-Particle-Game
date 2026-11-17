@@ -25,6 +25,17 @@ async function readMass(page: Page): Promise<number> {
 }
 
 /**
+ * Summon the sheet, and turn to a page of it. Everything but the caption lives in the sheet,
+ * so most tests start here.
+ */
+async function openSheet(page: Page, tab?: 'System' | 'Energy' | 'Sky' | 'Journal' | 'Settings'): Promise<void> {
+  const summon = page.getByRole('button', { name: 'Open the sheet' });
+  if ((await summon.count()) > 0) await summon.click();
+  await expect(page.getByTestId('sheet')).toBeVisible();
+  if (tab) await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: tab }).click();
+}
+
+/**
  * Just enough PNG to read pixels back: 8-bit, non-interlaced, RGB or RGBA, which is what a
  * screenshot is. So this only has to inflate the image data and undo the scanline filters.
  */
@@ -141,35 +152,41 @@ test.describe('the game runs', () => {
     await expect(page.getByText('Recharging')).toHaveCount(0);
   });
 
-  test('buys an upgrade and raises income', async ({ page }) => {
-    const buy = page.locator('.card .buy').first();
-    await expect(buy).toBeEnabled({ timeout: 45_000 });
+  test('offers the first current in the caption, and it flows once begun', async ({ page }) => {
+    // The one thing a first run asks: begin each current once. The caption offers it only
+    // when it can actually be done, so it is an invitation and never a nag.
+    const begin = page.getByTestId('begin');
+    await expect(begin).toBeVisible({ timeout: 45_000 });
+    await expect(begin).toContainText('Gravity Well');
+    await begin.click();
 
-    const rateBefore = await page.locator('.rate').innerText();
-    await buy.click();
-
-    await expect(page.locator('.card .level').first()).toHaveText('Lv 1');
-    await expect(page.locator('.rate')).not.toHaveText(rateBefore);
+    await openSheet(page, 'System');
+    const row = page.getByTestId('current-row').filter({ hasText: 'Gravity Well' });
+    await expect(row).toHaveAttribute('data-state', /flowing|settled/);
+    await expect(row.locator('.level')).not.toHaveText('Lv 0');
   });
 
   test('keeps progress across a reload', async ({ page }) => {
-    const buy = page.locator('.card .buy').first();
-    await expect(buy).toBeEnabled({ timeout: 45_000 });
-    await buy.click();
-    await expect(page.locator('.card .level').first()).toHaveText('Lv 1');
+    const begin = page.getByTestId('begin');
+    await expect(begin).toBeVisible({ timeout: 45_000 });
+    await begin.click();
+    await openSheet(page, 'System');
+    const level = page.getByTestId('current-row').first().locator('.level');
+    await expect(level).not.toHaveText('Lv 0');
 
     // The save is written on `pagehide`, which a reload fires — no need to wait out the
     // 10s autosave interval.
     await page.waitForTimeout(1500);
     await page.reload();
 
-    await expect(page.locator('.card .level').first()).toHaveText('Lv 1');
+    await openSheet(page, 'System');
+    await expect(page.getByTestId('current-row').first().locator('.level')).not.toHaveText('Lv 0');
     expect(await readMass(page)).toBeGreaterThan(0);
   });
 
   test('round trips a save through the export string', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-    await page.getByRole('button', { name: 'Settings' }).click();
+    await openSheet(page, 'Settings');
 
     await page.getByRole('button', { name: 'Export save' }).click();
     const saveString = await page.locator('textarea').inputValue();
@@ -221,10 +238,14 @@ test.describe('the game runs', () => {
     await page.reload();
 
     await expect(page.locator('.stage-name')).toHaveText('Planet');
+    // The caption says what comes next in words; the sheet has the numbers.
+    await expect(page.getByTestId('caption').locator('.next')).toContainText('Gas Giant');
+
+    await openSheet(page, 'System');
     await expect(page.locator('.stage-analogue')).toContainText('Earth');
     await expect(page.locator('.goal')).toContainText('Gas Giant');
 
-    await page.getByRole('button', { name: 'Progress' }).click();
+    await openSheet(page, 'Journal');
     const rows = page.locator('.stages li');
     await expect(rows).toHaveCount(18);
 
@@ -243,7 +264,8 @@ test.describe('the game runs', () => {
 
     await expect(page.locator('.stage-name')).toHaveText('Dust');
 
-    const banner = page.locator('.announce');
+    // A line that fades in, not a box that arrives.
+    const banner = page.locator('.whisper');
     await expect(banner).toBeVisible({ timeout: 20_000 });
     await expect(banner.locator('.title')).toHaveText('Pebble');
     await expect(page.locator('.stage-name')).toHaveText('Pebble');
@@ -254,39 +276,42 @@ test.describe('the game runs', () => {
     await seedSave(page, { mass: '1e9', totalMassEver: '1e9', achievements: [] });
     await page.reload();
 
-    const card = page.locator('.card').first();
-    await expect(card.locator('.auto.locked')).toContainText('begin it once');
-    await expect(card.locator('.level')).toHaveText('Lv 0');
+    await openSheet(page, 'System');
+    const row = page.getByTestId('current-row').filter({ hasText: 'Gravity Well' });
+    await expect(row).toHaveAttribute('data-state', 'closed');
+    await expect(row.locator('.level')).toHaveText('Lv 0');
 
-    await card.locator('.buy').first().click();
+    await row.locator('.begin').click();
 
     // Flowing is the default: no switch to find, the level simply climbs.
-    const toggle = card.locator('.auto input');
+    const toggle = row.locator('.flow input');
     await expect(toggle).toBeChecked();
     await expect
-      .poll(async () => Number((await card.locator('.level').innerText()).replace('Lv ', '')), {
+      .poll(async () => Number((await row.locator('.level').innerText()).replace('Lv ', '')), {
         timeout: 15_000,
       })
       .toBeGreaterThan(1);
 
-    // And it can be held.
+    // And it can be held, to be tended by hand.
     await toggle.uncheck();
-    const held = Number((await card.locator('.level').innerText()).replace('Lv ', ''));
+    await expect(row).toHaveAttribute('data-state', 'held');
+    const held = Number((await row.locator('.level').innerText()).replace('Lv ', ''));
     await page.waitForTimeout(1500);
-    expect(Number((await card.locator('.level').innerText()).replace('Lv ', ''))).toBe(held);
+    expect(Number((await row.locator('.level').innerText()).replace('Lv ', ''))).toBe(held);
   });
 
   test('shows what a level is worth, and unlocks achievements', async ({ page }) => {
     await seedSave(page, { mass: '1e6', totalMassEver: '1e6', levels: { gravity: 10 } });
     await page.reload();
 
-    // Every card states the income a level would add, which is how a saturated upgrade shows.
-    await expect(page.locator('.card .gain').first()).toContainText('%');
+    // Every row states the income a level would add, which is how a saturated current shows.
+    await openSheet(page, 'System');
+    await expect(page.getByTestId('current-row').first().locator('.gain')).toContainText('%');
 
-    await page.getByRole('button', { name: 'Progress' }).click();
+    await openSheet(page, 'Journal');
     await expect(page.locator('.achievements li.unlocked').first()).toBeVisible();
 
-    const banner = page.locator('.announce');
+    const banner = page.locator('.whisper');
     await expect(banner).toBeVisible();
     await expect(banner.locator('.eyebrow')).toContainText('Achievement');
   });
@@ -294,13 +319,14 @@ test.describe('the game runs', () => {
   test('keeps the Energy tab hidden until there is a disk, then runs on energy', async ({ page }) => {
     await seedSave(page, { mass: '1e4', totalMassEver: '1e4' });
     await page.reload();
+    await openSheet(page);
     await expect(page.getByRole('button', { name: 'Energy' })).toHaveCount(0);
 
     // Heavy enough to have a disk, with energy banked to spend.
     await seedSave(page, { mass: '1e12', totalMassEver: '1e12', energy: '1e9' });
     await page.reload();
 
-    await page.getByRole('button', { name: 'Energy' }).click();
+    await openSheet(page, 'Energy');
     await expect(page.locator('.chain .name')).toHaveText('Hydrogen');
     await expect(page.locator('.chain li')).toHaveCount(6);
     // Iron is listed and permanently out of reach.
@@ -309,11 +335,11 @@ test.describe('the game runs', () => {
 
     // The disk is bought out of energy, and mass is untouched by it.
     const massBefore = await page.locator('.mass').innerText();
-    const card = page.locator('.upgrades .card').first();
+    const card = page.getByTestId('current-row').first();
     await expect(card.locator('h3')).toHaveText('Accretion Disk');
     await expect(card.locator('.gain')).toContainText('throughput');
 
-    await card.locator('.buy').first().click();
+    await card.locator('.begin').click();
     // Opened, so it carries on: with energy banked it is several levels up before we look.
     await expect(card.locator('.level')).not.toHaveText('Lv 0');
     expect(await page.locator('.mass').innerText()).not.toBe('');
@@ -335,10 +361,11 @@ test.describe('the game runs', () => {
     await expect(page.locator('.stage-name')).toHaveText('Planet');
 
     // What the next promotion is worth, stated before you make it.
+    await openSheet(page, 'System');
     await expect(page.locator('.goal .pays')).toHaveText(/x[\d.]+/);
 
-    // The card that resets says so.
-    const density = page.locator('.upgrades .card', { hasText: 'Particle Density' });
+    // The current that resets says so.
+    const density = page.getByTestId('current-row').filter({ hasText: 'Particle Density' });
     await expect(density.locator('.rebased')).toHaveText('resets');
 
     // And the breakdown attributes the ladder's share to the ladder, rather than hiding it
@@ -365,7 +392,7 @@ test.describe('the game runs', () => {
     await page.reload();
     await expect(page.locator('.stage-name')).toHaveText('Yellow Dwarf');
 
-    await page.getByRole('button', { name: 'Sky' }).click();
+    await openSheet(page, 'Sky');
     const current = page.getByTestId('current');
     await expect(current).toContainText('The star is finished');
     await expect(current).toContainText('stardust');
@@ -377,7 +404,8 @@ test.describe('the game runs', () => {
     await page.getByTestId('release').click();
 
     // Between stars: the field is empty and the next cloud is a choice.
-    await expect(page.locator('.stage-name')).toHaveText('Dust');
+    await expect(page.locator('.stage-name')).toHaveText('Between stars');
+    await expect(page.getByTestId('caption-choose')).toBeVisible();
     await expect(page.getByTestId('choose')).toBeVisible();
     await expect(page.getByTestId('offer')).toHaveCount(3);
     await expect(page.locator('.readouts .value').nth(0)).toHaveText('91');
@@ -393,13 +421,14 @@ test.describe('the game runs', () => {
     await page.getByTestId('offer').first().click();
     await expect(page.getByTestId('choose')).toHaveCount(0);
     await expect(page.getByTestId('current')).toContainText(chosen);
+    await expect(page.locator('.stage-name')).toHaveText('Dust');
 
     // A new page rather than a reload. `seedSave` installs an init script, and an init script
     // runs on every navigation — reloading here would helpfully write the old save back over
     // the top and the test would be checking the fixture, not the game.
     const returning = await page.context().newPage();
     await returning.goto('/');
-    await returning.getByRole('button', { name: 'Sky' }).click();
+    await openSheet(returning, 'Sky');
     await expect(returning.locator('.readouts .value').nth(1)).toHaveText('1');
     await expect(returning.getByTestId('tree-card').filter({ hasText: 'Enrichment' }).locator('.level')).toHaveText('1 / 8');
     await expect(returning.getByTestId('current')).toContainText(chosen);
@@ -469,4 +498,50 @@ test.describe('the game runs', () => {
       expect(centre.spread).toBeGreaterThan(6);
     });
   }
+});
+
+test.describe('the interface recedes', () => {
+  test('dims when you stop moving, and comes back when you move', async ({ page }) => {
+    await page.goto('/');
+    const app = page.locator('main.app');
+    await expect(app).not.toHaveClass(/idle/);
+
+    // Nine seconds of stillness, by design; there is no shorter honest way to wait for it.
+    await expect(app).toHaveClass(/idle/, { timeout: 12_000 });
+    await page.mouse.move(200, 200);
+    await page.mouse.move(240, 260);
+    await expect(app).not.toHaveClass(/idle/);
+  });
+});
+
+test.describe('on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('keeps the caption on screen and brings the sheet up from the bottom', async ({ page }) => {
+    await page.goto('/');
+
+    const caption = page.getByTestId('caption');
+    await expect(caption).toBeVisible();
+    const captionBox = (await caption.boundingBox()) as Box;
+    expect(captionBox.x).toBeGreaterThanOrEqual(0);
+    expect(captionBox.x + captionBox.width).toBeLessThanOrEqual(390);
+
+    // Nothing wider than the screen: a phone layout that scrolls sideways is not one.
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBe(0);
+
+    await page.getByRole('button', { name: 'Open the sheet' }).click();
+    const sheet = page.getByTestId('sheet');
+    await expect(sheet).toBeVisible();
+    await page.waitForTimeout(800);
+    const sheetBox = (await sheet.boundingBox()) as Box;
+    expect(sheetBox.width).toBeCloseTo(390, 0);
+    expect(sheetBox.y + sheetBox.height).toBeCloseTo(844, 0);
+    expect(sheetBox.y, 'from the bottom, leaving the top of the field in view').toBeGreaterThan(150);
+
+    await page.keyboard.press('Escape');
+    await expect(sheet).toBeHidden();
+  });
 });
