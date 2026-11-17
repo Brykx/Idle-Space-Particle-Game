@@ -90,6 +90,11 @@ const MAX_VISUAL_SPAWN = 260;
  */
 const MIN_VISUAL_SPAWN = 22;
 
+/** Seconds over which the core's feeding is averaged. Long enough that no single hit shows. */
+const FEEDING_SMOOTHING = 4;
+/** Absorptions per second at which the feeding glow is halfway to its ceiling. */
+const FEEDING_HALF = 25;
+
 /** The radius the occluding disc is tessellated at, before it is scaled to the body. */
 const OCCLUDER_RADIUS = 512;
 
@@ -351,8 +356,18 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
   let shownGrain: GrainKind = 'mote';
 
   let pulseStrength = 1;
-  /** 0..1, brightens the core briefly on each absorption. */
-  let flash = 0;
+  /**
+   * How hard the core is feeding: absorptions per second, smoothed over several seconds, and
+   * the 0..1 glow that follows from it.
+   *
+   * This was a flash. Every absorption pushed the body a little larger and a little brighter,
+   * and at dozens a second the core never stopped jumping — the one thing on screen that was
+   * meant to be the calmest. What it carried was true, that you are catching things, but it
+   * said so once per rock. `warmth` is that, said once. Averaged, it says it once: the core glows a little warmer while
+   * the infall is heavy and cools as the cloud thins, and its size never moves at all.
+   */
+  let feeding = 0;
+  let warmth = 0;
   let time = 0;
 
   /** The record a release is carrying to its place, while it is in flight. */
@@ -543,8 +558,9 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     pool.update(dt, geo, tuning, pulseStrength);
 
     const absorbed = pool.drainAbsorbed();
-    if (absorbed > 0) flash = Math.min(1, flash + absorbed * 0.04);
-    flash *= Math.max(0, 1 - dt * 3.2);
+    if (dt > 0) feeding += (absorbed / dt - feeding) * (1 - Math.exp(-dt / FEEDING_SMOOTHING));
+    // Saturating, so no rate of infall can push the glow past a gentle ceiling.
+    warmth = feeding / (feeding + FEEDING_HALF);
     pulseStrength = 1 + (pulseStrength - 1) * Math.max(0, 1 - dt * 2.6);
 
     // Sync physics -> sprites. One pass, no allocation.
@@ -666,9 +682,10 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
 
     const luminous = LUMINOUS.has(shownBody);
 
-    // Core: sized by progress, brightened by what it just ate, with a slow idle breath.
-    const breath = rates.reducedMotion ? 0 : Math.sin(time * 1.1) * 0.025;
-    const coreScale = (geo.coreRadius / 64) * (1 + breath + flash * 0.18);
+    // Core: sized by progress and nothing else. A planet does not change size, so only what
+    // shines breathes — a star's very slow, very slight pulse — and nothing reacts to a hit.
+    const breath = rates.reducedMotion || !luminous ? 0 : Math.sin(time * 0.6) * 0.012;
+    const coreScale = (geo.coreRadius / 64) * (1 + breath);
 
     // Slightly inside the body's own edge, so the disc never shows as a black rim outside an
     // antialiased silhouette. A mote has no surface to hide behind, and a body mid-crossfade
@@ -687,7 +704,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       const body: Omit<BodyState, 'alpha'> = {
         radius,
         tint: coreTint,
-        flash,
+        flash: warmth * 0.35,
         time: rates.reducedMotion ? 0 : time,
       };
 
@@ -711,9 +728,9 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
       // Solid bodies keep their own colour. Washing a quarter of white through everything is
       // what made rock look like fog; only a luminous body should be near-white at rest.
       core.tint = luminous
-        ? mixColour(coreTint, 0xffffff, 0.3 + flash * 0.4)
-        : mixColour(coreTint, 0xffffff, flash * 0.35);
-      core.alpha = (luminous ? 0.85 + flash * 0.15 : bodyBlend) * presence;
+        ? mixColour(coreTint, 0xffffff, 0.3 + warmth * 0.15)
+        : mixColour(coreTint, 0xffffff, warmth * 0.08);
+      core.alpha = (luminous ? 0.85 + warmth * 0.1 : bodyBlend) * presence;
       corePrevious.alpha = (1 - bodyBlend) * presence;
     }
 
@@ -722,7 +739,7 @@ export async function createField(parent: HTMLElement, options: FieldOptions): P
     // bloom for them, and most of it would be a second glow on top of a better one.
     const bloom = bodies ? 0.4 : 1;
     halo.scale.set(coreScale * (luminous ? 1.7 : 1.1));
-    halo.alpha = (luminous ? 0.16 + flash * 0.2 + shown.scale * 0.12 : 0.05 + flash * 0.12) * bloom * presence;
+    halo.alpha = (luminous ? 0.16 + warmth * 0.08 + shown.scale * 0.12 : 0.05 + warmth * 0.05) * bloom * presence;
     halo.tint = particleTint;
 
     if (release.running) {
